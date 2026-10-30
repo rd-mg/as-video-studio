@@ -73,8 +73,8 @@ autentica nada, a propósito (ver «Quién está dentro» más abajo).
 | **ffmpeg** y **ffprobe** | la voz, la música y el MP4 | los pasos que los usan lo dicen |
 | **Microsoft Edge** (o Chrome) | rasterizar cada plano | igual |
 | Las **fuentes** de los subtítulos y las cartelas | medir y dibujar el texto | ver el aviso de `motores/README.md` |
-| El **CLI de Claude**, con sesión | el guion, el catálogo visual, los rótulos | no hay vídeo |
-| Una **clave de OpenAI** | las imágenes | no hay vídeo |
+| El **CLI de Antigravity (`agy`)**, con sesión | el guion, el catálogo visual, los rótulos (Gemini 3.8 Flash / Gemini 4 Argon) | no hay vídeo |
+| Una **clave de Google AI (`GEMINI_API_KEY`)** | las imágenes con Nano Banana 2.1 | no hay vídeo |
 | Una **clave de Cartesia** | la voz | no hay vídeo |
 | Las de **Jamendo** y **FreeSound** | música y efectos | el vídeo sale sin ellos; son las únicas prescindibles |
 
@@ -83,25 +83,25 @@ se guardan en `secretos/claves.json`, fuera del control de versiones. Ninguna
 clave baja entera al navegador: la pantalla ve la etiqueta, los cuatro últimos
 caracteres y el estado.
 
-**La primera vez, una guía de inicio** las pide de una en una —Claude la
-primera, porque es un login y no una clave— con los pasos y el enlace de donde
+**La primera vez, una guía de inicio** las pide de una en una —Antigravity CLI la
+primera, porque es un login OAuth y no una clave— con los pasos y el enlace de donde
 se consigue cada una. Se ve una vez por instalación (la marca vive en los
 ajustes del servidor, no en el navegador) y se vuelve a abrir desde
 Configuración.
 
 **Y abajo a la derecha hay un asistente.** Es un chat que contesta con tu propia
-cuenta de Claude —la misma con la que se escribe el guion— y que tiene delante
+cuenta de Antigravity CLI (`gemini-3.8-flash`) —la misma con la que se escribe el guion— y que tiene delante
 la documentación del producto, el código (sólo lectura: Read, Grep y Glob) y una
 foto del estado del Estudio en el momento de cada pregunta: qué claves hay, qué
 vídeo está abierto, qué paso está parado y con qué error. Y tiene manos:
 prueba las claves contra su servicio, mira los trabajos y la bitácora, y para
 un trabajo colgado, sin pedir permisos (`pasos/mcp_estudio.py`). Sin sesión de
-Claude lo dice y manda a entrar; con el cupo agotado, dice hasta cuándo. Lo
+Antigravity CLI lo dice y manda a entrar; con el cupo agotado, dice hasta cuándo. Lo
 que puede y no puede leer —`secretos/` no, por regla de permiso del CLI— está
 en `pasos/asistente.py`.
 
 **«Puesta» no es «funciona».** Configuración tiene «Probar todas las claves»
-(cada una contra su servicio, sin gastar) y cada cuenta de Claude enseña, al
+(cada una contra su servicio, sin gastar) y cada cuenta del CLI enseña, al
 lado de la sesión, cómo respondió la última vez: funciona, sin cupo, sesión
 caducada. Lo apunta cada llamada al CLI (`pasos/salud_cli.py`).
 
