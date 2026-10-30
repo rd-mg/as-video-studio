@@ -1,27 +1,32 @@
 {
   "version": 1,
   "moneda": "USD",
-  "actualizado": "2026-08-13T12:04:49",
+  "actualizado": "2026-10-30T18:00:00",
   "openai": {
-    "modelo": "gpt-image-2",
+    "modelo": "gemini-nano-banana-2.1",
     "usd_por_token": {
-      "entrada_texto": 5e-06,
-      "entrada_imagen": 8e-06,
+      "entrada_texto": 1.5e-06,
+      "entrada_imagen": 1.5e-06,
       "salida": 3e-05,
-      "nota": "Precios de gpt-image-2 por token (5, 8 y 30 $ por millon). Aqui esta el grueso del gasto de este pipeline y hasta ahora no se cobraba: a cada plano se le adjuntan las referencias de estilo, las de reparto y las dos de continuidad, y eso son unos 6.700 tokens de ENTRADA por imagen. En una tanda de 174 planos fueron 1,17 millones de tokens (unos 9,4 $) contra 1,04 $ de imagenes: el medidor ensenaba la decima parte. La entrada que la API no desglosa se tarifa como imagen, que es el precio mas alto de los dos: mas vale pasarse por arriba que volver a ensenar un gasto que no es."
+      "nota": "Precios de Nano Banana 2.1 (gemini-nano-banana-2.1) por token (1,5 $ por millon de entrada de texto/imagen y 30 $ por millon de salida de imagen). Manda el recuento de usageMetadata; usd_por_imagen queda de respaldo cuando no hay recuento de tokens."
     },
     "usd_por_imagen": {
       "1536x1024": {
-        "low": 0.006,
-        "medium": 0.041,
-        "high": 0.165
+        "low": 0.0336,
+        "medium": 0.0504,
+        "high": 0.113
       },
       "1024x1024": {
-        "low": 0.006,
-        "medium": 0.053,
-        "high": 0.211
+        "low": 0.0336,
+        "medium": 0.0504,
+        "high": 0.113
       },
-      "nota": "Respaldo, no la via principal. Solo cubre la imagen DEVUELTA, que es la parte pequena, y solo se usa cuando la API no devuelve 'usage' y por tanto no hay tokens que tarifar. Cuando hay usage manda usd_por_token, y las dos no se suman nunca: la imagen devuelta ya son los tokens de salida."
+      "1024x1536": {
+        "low": 0.0336,
+        "medium": 0.0504,
+        "high": 0.113
+      },
+      "nota": "Respaldo por resolucion (low=1K, medium=2K, high=4K) en Nano Banana 2.1 cuando la respuesta no trae usageMetadata."
     }
   },
   "tts": {

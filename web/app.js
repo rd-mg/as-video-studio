@@ -2433,15 +2433,15 @@ function seccionOpenAI(ficha) {
 
   const caja = h('section', { clase: 'bloque-config' },
     h('div', { clase: 'fila' },
-      h('h3', {}, 'OpenAI — imágenes'),
+      h('h3', {}, 'Nano Banana 2.1 (Google AI) — imágenes'),
       h('span', { clase: 'crece' }),
       (viva && viva.sin_saldo
         ? pastillaEstado('error', 'sin crédito')
         : pastillaEstado(puesta ? 'ok' : 'vacio',
           puesta ? cuenta.cola : 'sin poner'))),
     h('div', { clase: 'pista' },
-      'La clave con la que se generan las imágenes. Imprescindible, como la de '
-      + 'Cartesia y la cuenta de Claude: sin ella no hay planos que montar.'),
+      'La clave de Google AI (GEMINI_API_KEY) con la que Nano Banana 2.1 genera las imágenes. '
+      + 'Imprescindible, como la de Cartesia y la cuenta de Antigravity CLI: sin ella no hay planos que montar.'),
     h('div', { clase: 'fila-clave' }, campo,
       h('button', {
         clase: 'mini',
@@ -2515,7 +2515,7 @@ function seccionCLI() {
   const dentro = cuentas.filter(c => c.sesion && c.sesion.conectada).length;
   const caja = h('section', { clase: 'bloque-config' },
     h('div', { clase: 'fila' },
-      h('h3', {}, 'Claude CLI — guion, catálogo, rótulos…'),
+      h('h3', {}, 'Antigravity CLI (agy) — guion, catálogo, rótulos…'),
       h('span', { clase: 'crece' }),
       pastillaEstado(dentro ? 'ok' : 'error',
         !cli ? 'mirando…' : (dentro ? `${dentro} con sesión` : 'sin sesión'))),

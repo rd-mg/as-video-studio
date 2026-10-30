@@ -17,6 +17,7 @@ concurrencia.
 """
 import base64
 import hashlib
+import io
 import json
 import os
 import re
@@ -25,18 +26,17 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-from PIL import Image
 
-API_URL = "https://api.openai.com/v1/images/edits"
-#: SIN ADJUNTOS SE PIDE AQUI. /edits exige al menos una imagen --sin ellas la
-#: peticion sale como formulario normal y la API contesta «Unsupported content
-#: type»--, y /generations es la misma API para dibujar solo con texto: mismo
-#: modelo, mismos tamanos y calidades, y la misma respuesta en b64_json.
-API_URL_SIN_REFS = "https://api.openai.com/v1/images/generations"
-MODELO = "gpt-image-2"
+MODELO = "gemini-nano-banana-2.1"
+API_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent"
+)
+API_URL_SIN_REFS = API_URL
 
-PRECIO = {"low": 0.006, "medium": 0.041, "high": 0.165}
+PRECIO = {"low": 0.0336, "medium": 0.0504, "high": 0.113}
 TAMANOS = {"apaisado": "1536x1024", "cuadrado": "1024x1024", "vertical": "1024x1536"}
+ASPECTOS = {"apaisado": "16:9", "cuadrado": "1:1", "vertical": "9:16"}
+RESOLUCIONES = {"low": "1K", "medium": "2K", "high": "4K"}
 
 _gasto = {"usd": 0.0, "llamadas": 0}
 
@@ -372,13 +372,15 @@ def _del_almacen():
 
 def _del_entorno():
     claves = []
-    principal = os.environ.get("OPENAI_API_KEY")
-    if principal and principal.strip():
-        claves.append(("entorno", principal.strip()))
+    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
+        principal = os.environ.get(var)
+        if principal and principal.strip():
+            claves.append(("entorno", principal.strip()))
     for indice in range(2, 10):
-        clave = os.environ.get(f"OPENAI_API_KEY_{indice}")
-        if clave and clave.strip():
-            claves.append((f"entorno {indice}", clave.strip()))
+        for prefijo in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
+            clave = os.environ.get(f"{prefijo}_{indice}")
+            if clave and clave.strip():
+                claves.append((f"entorno {indice}", clave.strip()))
     return claves
 
 
@@ -388,7 +390,10 @@ def _del_env():
         return claves
     with open(RUTA_ENV, "r", encoding="utf-8-sig") as fh:
         for linea in fh:
-            m = re.match(r"^OPENAI_API_KEY(_\d+)?=(.*)$", linea.strip())
+            m = re.match(
+                r"^(?:GEMINI_API_KEY|GOOGLE_API_KEY|OPENAI_API_KEY)(_\d+)?=(.*)$",
+                linea.strip(),
+            )
             if m and m.group(2).strip():
                 claves.append(("", m.group(2).strip()))
     return claves
@@ -618,17 +623,21 @@ def _calibrar(respuesta, cuenta=None):
 
 
 def cargar_api_key():
-    clave = os.environ.get("OPENAI_API_KEY")
-    if clave:
-        return clave.strip()
+    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
+        clave = os.environ.get(var)
+        if clave and clave.strip():
+            return clave.strip()
     for ruta in (RUTA_ENV,):
         if os.path.exists(ruta):
             with open(ruta, "r", encoding="utf-8-sig") as fh:
                 for linea in fh:
-                    m = re.match(r"^OPENAI_API_KEY=(.*)$", linea.strip())
-                    if m:
+                    m = re.match(
+                        r"^(?:GEMINI_API_KEY|GOOGLE_API_KEY|OPENAI_API_KEY)=(.*)$",
+                        linea.strip(),
+                    )
+                    if m and m.group(1).strip():
                         return m.group(1).strip()
-    raise SystemExit("Falta OPENAI_API_KEY")
+    raise SystemExit("Falta GEMINI_API_KEY (o OPENAI_API_KEY)")
 
 
 def normalizar(ruta, cache_dir, lado_max=1024):
@@ -735,25 +744,76 @@ def _al_dia(destino, origen):
         return False
 
 
+def _ajustar_tamano_png(png_bytes, tamano):
+    """Garantiza que el PNG devuelto tenga la resolucion exacta de TAMANOS[tamano]."""
+    objetivo = TAMANOS.get(tamano)
+    if not objetivo or "x" not in objetivo:
+        return png_bytes
+    ancho, alto = (int(x) for x in objetivo.split("x", 1))
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(png_bytes))
+        if img.size == (ancho, alto):
+            return png_bytes
+        img = img.convert("RGBA").resize((ancho, alto), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001
+        return png_bytes
+
+
+def _extraer_respuesta_imagen(payload, tamano):
+    """Extrae (png_bytes, usage_dict) del JSON de Gemini Nano Banana 2.1 (o legado)."""
+    b64_img = None
+    for cand in payload.get("candidates") or ():
+        contenido = (cand or {}).get("content") or {}
+        for parte in contenido.get("parts") or ():
+            inline = (parte or {}).get("inlineData") or (parte or {}).get("inline_data")
+            if isinstance(inline, dict) and inline.get("data"):
+                b64_img = inline["data"]
+                break
+        if b64_img:
+            break
+    if not b64_img and isinstance(payload.get("data"), list) and payload["data"]:
+        b64_img = (payload["data"][0] or {}).get("b64_json")
+    if not b64_img:
+        raise RuntimeError(
+            f"Nano Banana 2.1 no devolvio imagen en candidates: {str(payload)[:300]}"
+        )
+    png = _ajustar_tamano_png(base64.b64decode(b64_img), tamano)
+
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        um = payload.get("usageMetadata") or {}
+        detalles = {
+            "cached_tokens": int(um.get("cachedContentTokenCount") or 0),
+        }
+        for d in um.get("promptTokensDetails") or ():
+            mod = str((d or {}).get("modality") or "").upper()
+            cnt = int((d or {}).get("tokenCount") or 0)
+            if mod == "TEXT":
+                detalles["text_tokens"] = cnt
+            elif mod == "IMAGE":
+                detalles["image_tokens"] = cnt
+        usage = {
+            "input_tokens": int(um.get("promptTokenCount") or 0),
+            "output_tokens": int(um.get("candidatesTokenCount") or 0),
+            "thinking_tokens": int(um.get("thoughtsTokenCount") or 0),
+            "total_tokens": int(um.get("totalTokenCount") or 0),
+            "input_tokens_details": detalles,
+        }
+    return png, usage
+
+
 def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             api_key=None, reintentos=6):
-    # SIN REFERENCIAS SE DIBUJA SOLO CON EL TEXTO, por /generations. Aqui habia
-    # un ValueError: requests solo pone 'multipart/form-data' cuando `files` no
-    # esta vacio, asi que una lista vacia mandada a /edits salia como formulario
-    # normal y la API contestaba «Unsupported content type», que manda a buscar
-    # al sitio equivocado. El guardian lo explicaba bien, pero dejaba roto a
-    # quien llamaba asi A PROPOSITO -- las laminas de un estilo nuevo
-    # (`moodboard.dibujar_desde_guia`) --, y crear un estilo fallaba siempre.
-    # Ahora cada lista va a la API que le toca y las dos responden igual.
     referencias = list(referencias or [])
     faltan = [r for r in referencias if not os.path.exists(r)]
     if faltan:
         raise ValueError("estas imagenes de referencia no existen: "
                          + ", ".join(str(f) for f in faltan[:5]))
 
-    # con api_key explicita se respeta esa clave (una cuenta efimera con su
-    # propio cubo); sin ella, cada intento elige la cuenta con hueco -- que es
-    # lo que reparte una tanda entre dos claves sin tocar a quien llama
     cuenta_fija = _Cuenta("clave explicita", api_key) if api_key else None
     ultimo_error = None
     reintento_imagen = False
@@ -761,36 +821,37 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
 
     for intento in range(reintentos + 1):
         cuenta = cuenta_fija or _elegir_cuenta(len(referencias))
-        # si otra cadena se ha comido la ventana del limite de ESTA cuenta,
-        # aqui se espera: salir a llamar igualmente es gastar otro 429
         _esperar_turno(cuenta)
-        # y aunque no haya freno puesto, no se rebasa el ritmo permitido. Se
-        # piden tantas fichas como adjuntos lleva, que es lo que cuenta el cubo
-        # del otro lado.
         _pedir_ficha(len(referencias), cuenta)
-        abiertos, archivos = [], []
-        cabeceras = {"Authorization": f"Bearer {cuenta.clave}"}
-        try:
-            t0 = time.time()
-            if referencias:
-                for ruta in referencias:
-                    fh = open(ruta, "rb")
-                    abiertos.append(fh)
-                    archivos.append(("image[]", (os.path.basename(ruta), fh,
-                                                 "image/png")))
-                datos = {"model": MODELO, "prompt": prompt,
-                         "size": TAMANOS[tamano], "quality": quality, "n": "1"}
-                r = requests.post(API_URL, headers=cabeceras, data=datos,
-                                  files=archivos, timeout=600)
-            else:
-                datos = {"model": MODELO, "prompt": prompt,
-                         "size": TAMANOS[tamano], "quality": quality, "n": 1}
-                r = requests.post(API_URL_SIN_REFS, headers=cabeceras,
-                                  json=datos, timeout=600)
-            segundos = time.time() - t0
-        finally:
-            for fh in abiertos:
-                fh.close()
+        cabeceras = {
+            "x-goog-api-key": cuenta.clave,
+            "Authorization": f"Bearer {cuenta.clave}",
+            "Content-Type": "application/json",
+        }
+        t0 = time.time()
+        partes = []
+        for ruta in referencias[:14]:
+            with open(ruta, "rb") as fh:
+                b64_ref = base64.b64encode(fh.read()).decode("ascii")
+            partes.append({
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": b64_ref,
+                }
+            })
+        partes.append({"text": prompt})
+        datos = {
+            "contents": [{"parts": partes}],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": ASPECTOS.get(tamano, "16:9"),
+                    "imageSize": RESOLUCIONES.get(quality, "1K"),
+                },
+            },
+        }
+        r = requests.post(API_URL, headers=cabeceras, json=datos, timeout=600)
+        segundos = time.time() - t0
 
         # se aprende de TODAS las respuestas, no solo de los errores: el sitio
         # donde la API dice cuanto queda es la respuesta buena
@@ -801,28 +862,22 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
 
         if r.status_code == 200:
             payload = r.json()
-            png = base64.b64decode(payload["data"][0]["b64_json"])
+            png, usage = _extraer_respuesta_imagen(payload, tamano)
             _gasto["usd"] += PRECIO[quality]
             _gasto["llamadas"] += 1
-            # si iba justa y nadie la frena, se tantea un ritmo mas alto
             if cuenta_fija is None:
                 _quizas_subir(cuenta)
-            # 'usage' es el unico recuento real de tokens de esta llamada y solo
-            # existe aqui: se devuelve tal cual para que el medidor no lo estime
             return png, {"segundos": round(segundos, 1), "quality": quality,
                          "refs": len(referencias), "coste": PRECIO[quality],
                          "modelo": MODELO, "tamano": TAMANOS[tamano],
-                         "usage": payload.get("usage") or {}}
+                         "usage": usage}
 
         ultimo_error = f"HTTP {r.status_code}: {r.text[:200]}"
-        # UNA CLAVE QUE NO VALE aparta SU cuenta y se sigue con las demas. Es el
-        # gemelo del «sin credito» de abajo, y existe por un caso real: una de
-        # tres claves rotada en OpenAI y cada tanda con un tercio de
-        # probabilidades de morir en la primera imagen con «Incorrect API
-        # key». Solo el 401 de clave; el 401 de cuota lo lee `_sin_saldo`.
-        if r.status_code == 401 and not _sin_saldo(r):
+        if (r.status_code in (400, 401, 403)
+                and not _sin_saldo(r)
+                and (r.status_code in (401, 403) or "api_key_invalid" in r.text.lower())):
             cuenta.clave_rechazada = True
-            print(f"[imagen] {cuenta.nombre}: OpenAI rechaza su clave (401); "
+            print(f"[imagen] {cuenta.nombre}: Google AI rechaza su clave ({r.status_code}); "
                   f"se aparta y se sigue con las demas", flush=True)
             if cuenta_fija is None \
                     and any(not c.sin_saldo and not c.clave_rechazada
@@ -830,29 +885,21 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                     and intento < reintentos:
                 continue
             raise RuntimeError(
-                f"OpenAI rechaza la clave de {cuenta.nombre} (401 Incorrect API "
-                f"key): revisala en Configuracion > Claves. {ultimo_error}")
-        # Un 429 puede ser dos cosas MUY distintas: "vas demasiado rapido", que
-        # se arregla esperando, o "no te queda saldo", que no se arregla nunca
-        # por mucho que se reintente. Distinguirlas evita quemar tres esperas
-        # para acabar en el mismo sitio, y sobre todo evita el mensaje que manda
-        # a mirar la red cuando lo que hay que hacer es recargar la cuenta.
+                f"Google AI rechaza la clave de {cuenta.nombre} ({r.status_code}): "
+                f"revisala en Configuracion > Claves. {ultimo_error}")
         if _sin_saldo(r):
             cuenta.sin_saldo = True
             if cuenta_fija is None \
                     and any(not c.sin_saldo for c in _cuentas()) \
                     and intento < reintentos:
-                # con otra cuenta viva se sigue con ella: abortar la tanda por
-                # una de las dos claves seria tirar la mitad que queda
                 print(f"[imagen] {cuenta.nombre} sin credito: se sigue con "
                       f"las demas", flush=True)
                 continue
             raise SinSaldo(
-                "la cuenta de OpenAI se ha quedado sin credito, asi que no se "
-                "pueden generar mas imagenes. Recarga en "
-                "https://platform.openai.com/settings/organization/billing y "
-                "retoma la generacion: lo ya generado NO se pierde ni se vuelve "
-                "a pagar.")
+                "la cuenta de Google AI (Nano Banana 2.1) se ha quedado sin "
+                "cuota o credito, asi que no se pueden generar mas imagenes. "
+                "Revisa tu facturacion en Google AI Studio y retoma la "
+                "generacion: lo ya generado NO se pierde ni se vuelve a pagar.")
         if r.status_code == 429 and intento < reintentos:
             # el freno es de todas las cadenas DE ESA CUENTA: si lo pone una,
             # las demas tampoco salen a llamar con esa clave hasta que su

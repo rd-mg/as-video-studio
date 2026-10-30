@@ -99,23 +99,26 @@ def _texto_corto(respuesta):
 
 def probar_openai(clave):
     if not clave:
-        return _ficha("openai", "sin_clave", "no hay clave de OpenAI puesta")
-    respuesta, fallo = _pedir("GET", "https://api.openai.com/v1/models",
-                              headers={"Authorization": f"Bearer {clave}"})
+        return _ficha("openai", "sin_clave", "no hay clave de Nano Banana 2.1 (Google AI) puesta")
+    respuesta, fallo = _pedir(
+        "GET",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-nano-banana-2.1",
+        headers={"x-goog-api-key": clave, "Authorization": f"Bearer {clave}"},
+    )
     if respuesta is None:
-        return _ficha("openai", "sin_red", f"no se ha podido hablar con OpenAI: {fallo}")
+        return _ficha("openai", "sin_red", f"no se ha podido hablar con Google AI: {fallo}")
     if respuesta.status_code == 200:
         return _ficha("openai", "ok",
-                      "la clave autentica. Lo que NO se puede saber sin pagar una "
-                      "imagen es si la cuenta tiene saldo: se mira en "
-                      "platform.openai.com → Billing")
-    if respuesta.status_code == 401:
-        return _ficha("openai", "mal", "OpenAI no reconoce la clave (401): esta mal "
+                      "la clave autentica en Google AI (Nano Banana 2.1). Lo que NO se "
+                      "puede saber sin generar una imagen es el saldo disponible en tu "
+                      "cuenta de Google AI Studio")
+    if respuesta.status_code in (400, 401, 403):
+        return _ficha("openai", "mal", "Google AI no reconoce la clave (401): esta mal "
                                        "copiada, revocada o es de otra cuenta")
     if respuesta.status_code == 429:
-        return _ficha("openai", "mal", f"OpenAI contesta 429 (limite o sin saldo): "
+        return _ficha("openai", "mal", f"Google AI contesta 429 (limite o sin saldo): "
                                        f"{_texto_corto(respuesta)}")
-    return _ficha("openai", "mal", f"OpenAI contesta {respuesta.status_code}: "
+    return _ficha("openai", "mal", f"Google AI contesta {respuesta.status_code}: "
                                    f"{_texto_corto(respuesta)}")
 
 

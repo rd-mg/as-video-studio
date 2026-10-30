@@ -163,7 +163,7 @@ def prueba_medidor(proyecto):
                              usd=coste.tarifa_imagen("1536x1024", "medium"),
                              usd_estimado=True)
     igual(primero["id"], "ev_00001", "el primer evento es ev_00001")
-    igual(primero["usd"], 0.041, "el importe sale de la tabla de tarifas")
+    igual(primero["usd"], 0.0504, "el importe sale de la tabla de tarifas")
     ok(primero["usd_estimado"] is True, "lo derivado de tarifa va marcado")
 
     segundo = medidor.anotar("openai", "assets", "generar_escena",
@@ -186,7 +186,7 @@ def prueba_medidor(proyecto):
 
     total = medidor.total()
     igual(total["eventos"], 4, "cuenta los cuatro eventos")
-    igual(round(total["total_usd"], 4), 0.082, "el total solo suma openai y tts")
+    igual(round(total["total_usd"], 4), 0.1008, "el total solo suma openai y tts")
     igual(total["proveedores"]["claude_cli"]["tokens"]["total"], 184000,
           "claude suma sus tokens")
     ok(total["proveedores"]["claude_cli"]["suma_al_total"] is False,
@@ -195,11 +195,11 @@ def prueba_medidor(proyecto):
           "los caracteres de la voz son los enviados")
     ok("184k tok" in total["cabecera"] and "41.2k car" in total["cabecera"],
        f"la cabecera va formateada: {total['cabecera']}")
-    ok("TOTAL  $0.08" in total["cabecera"], "el TOTAL sale en la cabecera")
+    ok("TOTAL  $0.10" in total["cabecera"], "el TOTAL sale en la cabecera")
 
     por_paso = medidor.por_paso()
     pasos = {f["paso"]: f for f in por_paso["pasos"]}
-    igual(round(pasos["assets"]["total_usd"], 4), 0.082,
+    igual(round(pasos["assets"]["total_usd"], 4), 0.1008,
           "assets se lleva todo el gasto en dolares")
     igual(pasos["voz"]["proveedores"]["tts"]["cantidad"]["caracteres"], 41200,
           "el paso de voz se lleva los caracteres")
@@ -895,7 +895,8 @@ def prueba_agente(carpeta, proyecto):
 
     # el ajuste llega por invocacion, no por params del paso: mover el
     # desplegable no puede dejar obsoleto el video entero
-    ok("opus" in visto["orden"] and "medium" in visto["orden"],
+    ok(("gemini-4-argon" in visto["orden"] or "opus" in visto["orden"])
+       and "medium" in visto["orden"],
        "el modelo y el esfuerzo elegidos llegan a la orden del CLI")
     ok(visto.get("timeout") and visto["timeout"] > 1800,
        f"y el plazo escala con el esfuerzo: {visto.get('timeout')} s "

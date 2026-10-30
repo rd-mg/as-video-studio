@@ -231,12 +231,20 @@ def adoptar_env():
     """
     datos = _vacio()
     valores = _valores_env()
-    principal = valores.get("OPENAI_API_KEY")
+    principal = (
+        valores.get("GEMINI_API_KEY")
+        or valores.get("GOOGLE_API_KEY")
+        or valores.get("OPENAI_API_KEY")
+    )
     if principal:
         datos["openai"].append({"id": "cta1", "etiqueta": "", "clave": principal,
                                 "activa": True})
     for indice in range(2, MAX_OPENAI + 1):
-        clave = valores.get(f"OPENAI_API_KEY_{indice}")
+        clave = (
+            valores.get(f"GEMINI_API_KEY_{indice}")
+            or valores.get(f"GOOGLE_API_KEY_{indice}")
+            or valores.get(f"OPENAI_API_KEY_{indice}")
+        )
         if clave:
             datos["openai"].append({"id": f"cta{indice}", "etiqueta": "",
                                     "clave": clave, "activa": True})
@@ -466,7 +474,9 @@ def espejar_env(datos=None):
     nuestras = {}
     for indice, cuenta in enumerate(activas, start=1):
         nombre = "OPENAI_API_KEY" if indice == 1 else f"OPENAI_API_KEY_{indice}"
+        nombre_gem = "GEMINI_API_KEY" if indice == 1 else f"GEMINI_API_KEY_{indice}"
         nuestras[nombre] = cuenta["clave"]
+        nuestras[nombre_gem] = cuenta["clave"]
     if datos["cartesia"]["clave"]:
         nuestras["CARTESIA_API_KEY"] = datos["cartesia"]["clave"]
     if datos["jamendo"]["clave"]:
@@ -476,9 +486,11 @@ def espejar_env(datos=None):
 
     # Los nombres que ESTA pantalla escribe. Lo que no este aqui se conserva tal
     # cual y en su orden: un .env puede tener cosas que nadie de aqui gestiona.
-    gestionadas = {"OPENAI_API_KEY", "CARTESIA_API_KEY",
-                   "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY"} | {
-        f"OPENAI_API_KEY_{i}" for i in range(2, MAX_OPENAI + 1)}
+    gestionadas = {
+        "OPENAI_API_KEY", "GEMINI_API_KEY", "CARTESIA_API_KEY",
+        "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY",
+    } | {f"OPENAI_API_KEY_{i}" for i in range(2, MAX_OPENAI + 1)} | {
+        f"GEMINI_API_KEY_{i}" for i in range(2, MAX_OPENAI + 1)}
 
     lineas, puestas = [], set()
     if os.path.exists(FICHERO_ENV):
