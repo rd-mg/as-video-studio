@@ -1606,19 +1606,19 @@ def prueba_guia_de_estilo():
     # de imagenes-- es que NUNCA caiga al escalon barato, y que su recomendacion
     # razonada siga escrita para el dia que se vuelva al reparto por fase.
     por_fase = cli_claude.por_defecto_de("guia_estilo")
-    igual(por_fase["modelo"], "opus", "la escribe opus")
+    igual(por_fase["modelo"], "gemini-4-argon", "la escribe gemini-4-argon")
     ok(por_fase["esfuerzo"] in ("high", "xhigh", "max"),
        f"con esfuerzo alto: {por_fase['esfuerzo']}")
     recomendado = por_fase.get("recomendado") or {}
     igual((recomendado.get("modelo"), recomendado.get("esfuerzo")),
-          ("opus", "high"),
+          ("gemini-4-argon", "high"),
           "y su recomendacion propia sigue escrita, sin borrar")
     ok(len(por_fase.get("porque") or "") > 40, "y esta escrito por que")
     # EL DEFECTO ES UN SUELO, NO UN TECHO: una fase que pide mas no se rebaja.
     # Se prueba con una fase de mentira porque hoy ninguna real pide 'max', y la
     # regla tiene que seguir protegida el dia que alguna vuelva a pedirlo.
     cli_claude.POR_FASE["_prueba_max"] = {
-        "modelo": "opus", "esfuerzo": "max",
+        "modelo": "gemini-4-argon", "esfuerzo": "max",
         "porque": "fase de prueba: comprueba que el defecto no rebaja a nadie"}
     try:
         igual(cli_claude.por_defecto_de("_prueba_max")["esfuerzo"], "max",

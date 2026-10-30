@@ -81,7 +81,7 @@ except ImportError:  # ejecutado con la carpeta pasos en sys.path
 RAIZ_ESTUDIO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 #: Con que contesta. Ver la cabecera: un chat pide segundos, no minutos.
-MODELO = os.environ.get("ESTUDIO_ASISTENTE_MODELO") or "sonnet"
+MODELO = os.environ.get("ESTUDIO_ASISTENTE_MODELO") or "gemini-3.8-flash"
 ESFUERZO = os.environ.get("ESTUDIO_ASISTENTE_ESFUERZO") or "medium"
 
 #: Techo de UN turno. Con herramientas de lectura un turno puede encadenar

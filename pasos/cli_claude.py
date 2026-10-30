@@ -46,42 +46,51 @@ import signal
 import subprocess
 import time
 
+# Asegura que las carpetas habituales de instalacion de `agy` esten en PATH
+# antes de que `shutil.which` busque el binario, sin romper los dobles de prueba
+# que sustituyen `shutil.which`.
+for _dir_extra in (
+    os.path.expanduser("~/.gemini/bin"),
+    os.path.expanduser("~/.local/bin"),
+    os.path.join(os.environ.get("LOCALAPPDATA") or "", "agy", "bin"),
+):
+    if _dir_extra and os.path.isdir(_dir_extra):
+        _path_actual = os.environ.get("PATH") or ""
+        if _dir_extra not in _path_actual.split(os.pathsep):
+            os.environ["PATH"] = (
+                f"{_dir_extra}{os.pathsep}{_path_actual}" if _path_actual else _dir_extra
+            )
+
 # ------------------------------------------------------------------ catalogo
 
-# Alias que entiende el CLI. Se validan contra esta lista porque un modelo mal
-# escrito hoy solo se detecta por returncode != 0, o sea despues de haber pagado
-# el arranque del CLI y la espera entera.
-# Sin ventana negra. El CLI se invoca a traves de claude.cmd, o sea un proceso
-# de consola, y desde un servicio eso abre una ventana encima de todo por cada
-# llamada -- una por bloque de guion, una por escenario --. Trabajando por
-# escritorio remoto es la pantalla tapandose sola durante veinte minutos.
-# Escrito aqui y no importado de `medios`: este modulo se carga antes que el, y
-# no tiene ninguna otra razon para conocerlo.
+# Alias que entiende el CLI (Antigravity CLI `agy`). Se validan contra esta
+# lista porque un modelo mal escrito solo se detecta por returncode != 0, o sea
+# despues de haber pagado el arranque del CLI y la espera entera.
 SIN_VENTANA = {}
 if os.name == "nt":
     SIN_VENTANA = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
 
-MODELOS = ("haiku", "sonnet", "opus")
+MODELOS = ("gemini-3.8-flash", "gemini-4-argon")
+
+# Alias cortos y nombres heredados (para que proyectos guardados o pruebas que
+# pidan haiku/sonnet/opus se traduzcan limpiamente a los modelos de agy).
+ALIAS_MODELOS = {
+    "flash": "gemini-3.8-flash",
+    "argon": "gemini-4-argon",
+    "haiku": "gemini-3.8-flash",
+    "sonnet": "gemini-3.8-flash",
+    "opus": "gemini-4-argon",
+}
 
 # Un id completo tambien vale: el catalogo cambia mas rapido que este fichero.
-PATRON_MODELO_COMPLETO = re.compile(r"^claude-[a-z0-9][a-z0-9.\-]*$")
+PATRON_MODELO_COMPLETO = re.compile(
+    r"^(?:gemini-[a-z0-9][a-z0-9.\-]*|claude-[a-z0-9][a-z0-9.\-]*)$"
+)
 
 ESFUERZOS = ("low", "medium", "high", "xhigh", "max")
 
-# LO QUE CORRE CUANDO NADIE ELIGE: OPUS CON ESFUERZO MUY ALTO.
-#
-# Decision del canal (21-08-2026): «que por defecto todo corra en Opus 5 Extra,
-# que el selector en todos ellos este por defecto en Opus 5 Extra, aunque si lo
-# cambio que se mantenga mi cambio». Antes era sonnet/low, que es lo barato, y la
-# consecuencia era que cada fase salia con lo minimo salvo que alguien se
-# acordara de subirla una por una.
-#
-# LO QUE CUESTA, dicho aqui para que nadie lo descubra mirando el reloj: son
-# 17,6 veces el tiempo de sonnet/low (2,2 del modelo por 8,0 del esfuerzo), y hay
-# fases que llaman UNA VEZ POR PLANO -- son 49 llamadas en el video
-# del video largo --. Se elige a sabiendas; el selector de cada tarjeta sigue ahi
-# para bajarlo donde no compense, y lo que se baje se recuerda.
-MODELO_POR_DEFECTO = "opus"
+# LO QUE CORRE CUANDO NADIE ELIGE: GEMINI 4 ARGON CON ESFUERZO MUY ALTO.
+MODELO_POR_DEFECTO = "gemini-4-argon"
 ESFUERZO_POR_DEFECTO = "xhigh"
 
 # Cuanto multiplica cada esfuerzo al tiempo de 'low'. NO son medidas: 'low' es lo
@@ -90,8 +99,14 @@ ESFUERZO_POR_DEFECTO = "xhigh"
 # razonables; en cuanto haya historial de una combinacion, manda el historial.
 FACTOR_ESFUERZO = {"low": 1.0, "medium": 2.5, "high": 5.0, "xhigh": 8.0, "max": 12.0}
 
-# Lo mismo para el modelo, relativo a sonnet.
-FACTOR_MODELO = {"haiku": 0.6, "sonnet": 1.0, "opus": 2.2}
+# Lo mismo para el modelo, relativo a la referencia base (1.0).
+FACTOR_MODELO = {
+    "gemini-3.8-flash": 1.0,
+    "gemini-4-argon": 2.2,
+    "haiku": 0.6,
+    "sonnet": 1.0,
+    "opus": 2.2,
+}
 
 # Techo absoluto. Un trabajo puede tardar mucho y eso es legitimo (la barra lo
 # ensena y se puede cancelar), pero mas de una hora esperando a una sola llamada
@@ -99,22 +114,10 @@ FACTOR_MODELO = {"haiku": 0.6, "sonnet": 1.0, "opus": 2.2}
 TIEMPO_MAXIMO_S = 3600
 TIEMPO_MINIMO_S = 30
 
-# Variables del entorno que le cambian el razonamiento al CLI. --effort ya pisa a
-# CLAUDE_EFFORT (medido), pero MAX_THINKING_TOKENS actua por su cuenta, y el
-# Estudio se arranca a menudo desde una sesion de Claude Code que las trae
-# puestas: se quitan para que tarde lo mismo se lance desde donde se lance.
-ENTORNO_FUERA = ("CLAUDE_EFFORT", "MAX_THINKING_TOKENS")
+# Variables del entorno que le cambian el razonamiento al CLI.
+ENTORNO_FUERA = ("CLAUDE_EFFORT", "MAX_THINKING_TOKENS", "AGY_EFFORT")
 
-# Y las que sacarian la llamada FUERA de la suscripcion: una clave de API, un
-# token, una pasarela o un proveedor en la nube. El Estudio consume la
-# suscripcion del CLI y solo esa, asi que ninguna variable heredada del entorno
-# puede convertir un paso en pago por uso sin que nadie se entere. Se borran en
-# el entorno del HIJO, que es lo unico que hace la garantia independiente de
-# desde donde se arranque el servicio.
-#
-# Duplicado a proposito en los cinco sitios que llaman al CLI (watcher, creador,
-# nocturno de X, nocturno de SEO y aqui), por la misma razon que uso_cli.py: los
-# sistemas se conectan por contrato, nunca importandose codigo.
+# Y las que sacarian la llamada FUERA de la suscripcion del CLI.
 PAGO_POR_USO = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                 "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
 
@@ -192,19 +195,24 @@ def modelo_valido(valor):
     """True si el CLI va a entender ese modelo."""
     texto = str(valor or "").strip().lower()
     return bool(texto) and (texto in MODELOS
+                            or texto in ALIAS_MODELOS
                             or bool(PATRON_MODELO_COMPLETO.match(texto)))
 
 
 def normalizar_modelo(valor, estricto=True, defecto=MODELO_POR_DEFECTO):
+    respaldo = ALIAS_MODELOS.get(str(defecto or "").strip().lower(),
+                                 defecto or MODELO_POR_DEFECTO)
     texto = str(valor or "").strip().lower()
     if not texto:
-        return defecto
+        return respaldo
+    if texto in ALIAS_MODELOS:
+        return ALIAS_MODELOS[texto]
     if not modelo_valido(texto):
         if estricto:
             raise ValueError(
                 f"modelo desconocido: {texto!r}. Usa uno de "
-                f"{', '.join(MODELOS)} o un id completo tipo 'claude-opus-5'")
-        return defecto
+                f"{', '.join(MODELOS)} o un id completo tipo 'gemini-4-argon'")
+        return respaldo
     return texto
 
 
@@ -221,8 +229,10 @@ def normalizar_esfuerzo(valor, estricto=True, defecto=ESFUERZO_POR_DEFECTO):
 
 
 def factor(modelo=MODELO_POR_DEFECTO, esfuerzo=ESFUERZO_POR_DEFECTO):
-    """Cuanto se espera que multiplique una combinacion al tiempo de sonnet/low."""
-    return (FACTOR_MODELO.get(str(modelo or "").strip().lower(), 1.0)
+    """Cuanto se espera que multiplique una combinacion al tiempo de referencia."""
+    m = str(modelo or "").strip().lower()
+    m = ALIAS_MODELOS.get(m, m) if m not in FACTOR_MODELO else m
+    return (FACTOR_MODELO.get(m, 1.0)
             * FACTOR_ESFUERZO.get(str(esfuerzo or "").strip().lower(), 1.0))
 
 
@@ -245,130 +255,59 @@ def tiempo_max(esfuerzo=ESFUERZO_POR_DEFECTO, base_s=420, modelo=None,
                    min(TIEMPO_MAXIMO_S, round(float(base_s) * escala))))
 
 
-# Ajuste por defecto de cada fase, elegido por la COMPLEJIDAD de su tarea y no
-# por inercia.
-#
-# De donde salen estos valores
-# ----------------------------
-# De la matriz por tipo de tarea que publican las guias del parametro de
-# esfuerzo, no de una corazonada:
-#
-#   pregunta simple, clasificacion, lotes ......... bajo
-#   generacion de contenido, redaccion rutinaria .. medio
-#   revision de codigo, depuracion, trabajo creativo alto
-#   arquitectura, analisis legal, flujos agenticos  maximo
-#
-# Y de tres hallazgos medidos que corrigen la intuicion de "mas esfuerzo es
-# siempre mejor":
-#
-#   - En FrontierCode v1.1, Opus 5 con esfuerzo MEDIO es la configuracion mas
-#     eficiente por computo (53,4 %), y el esfuerzo alto da rendimientos
-#     decrecientes o ligeramente negativos en tareas de codigo.
-#   - La calidad escala casi lineal hasta 'xhigh' y ahi se aplana: 'max' es
-#     mucho gasto para muy poco, y quien lo ha medido lo llama una trampa.
-#     El alto ya da el 90-95 % de la calidad del maximo por una fraccion.
-#   - El esfuerzo bajo esta INFRAUTILIZADO: tareas como redactar una respuesta
-#     corta a partir de datos concretos salen igual de bien en bajo.
-#
-# El coste no es lineal: de bajo a medio son ~2,5x los tokens, a alto ~6x y a
-# maximo ~12x. Por eso subir un escalon tiene que ganarselo.
+# Ajuste por defecto de cada fase, elegido por la COMPLEJIDAD de su tarea en
+# Antigravity CLI (`agy`): `gemini-3.8-flash` para clasificacion y transformacion
+# acotada; `gemini-4-argon` para redaccion y criterio visual/narrativo.
 POR_FASE = {
-    # Redactar el guion desde un transcript de 19.000 palabras, con horquilla de
-    # palabras, troceado en bloques y adaptacion a varios idiomas. En la matriz
-    # es "generacion de contenido", que pide MEDIO. Se resistio la tentacion de
-    # poner alto: el historial dice que en bajo termina bien 20 de 20 veces, asi
-    # que medio ya es subir un escalon sobre algo que funciona.
-    "guion": {"modelo": "sonnet", "esfuerzo": "medium",
+    "guion": {"modelo": "gemini-3.8-flash", "esfuerzo": "medium",
               "porque": "generacion de contenido larga con restricciones; en la "
                         "matriz por tarea eso es esfuerzo medio, y el historial "
                         "dice que en bajo ya termina bien 20 de 20 veces"},
 
-    # Leer varias transcripciones enteras de un canal y destilar de ellas COMO
-    # escribe. Es el gemelo en texto de 'guia_estilo': una sola llamada, entrada
-    # larga, y su salida --las instrucciones de guion-- la heredan todos los
-    # videos del canal. Ahi se aplica la misma lectura que alli, con una
-    # diferencia que baja un escalon: esto lo lee y lo edita una persona en un
-    # campo de texto antes de que escriba nada, asi que un matiz perdido se ve y
-    # se corrige, mientras que la guia de estilo se aplica a ciegas en cada
-    # imagen.
-    "tono": {"modelo": "opus", "esfuerzo": "medium",
+    "tono": {"modelo": "gemini-4-argon", "esfuerzo": "medium",
              "porque": "destila de varias transcripciones como escribe un canal, "
                        "y eso lo heredan todos sus videos; medio y no alto "
                        "porque lo lee y lo corrige una persona antes de usarlo"},
 
-    # Leer el guion ENTERO y repartirlo en personajes, sitios y tramos. Es una
-    # sola llamada por video, con todo el texto delante, y de ella depende que
-    # los planos no se repitan: es el sitio donde pagar esfuerzo sale barato.
-    # Medio y no alto por lo mismo que el guion: alto se reserva para cuando el
-    # historial diga que medio se queda corto.
-    # Elegir voz leyendo ciento veinte descripciones y fijar cuatro mandos. Es
-    # lectura y criterio, no razonamiento largo, y ademas la propuesta se ve
-    # antes de grabar nada: equivocarse no cuesta una toma, cuesta un clic.
-    "voz_descrita": {"modelo": "sonnet", "esfuerzo": "low",
+    "voz_descrita": {"modelo": "gemini-3.8-flash", "esfuerzo": "low",
                      "porque": "leer un catalogo y elegir; lo que salga se ve "
                                "en los mandos antes de pagar ninguna sintesis"},
 
-    "catalogo_visual": {"modelo": "sonnet", "esfuerzo": "medium",
+    "catalogo_visual": {"modelo": "gemini-3.8-flash", "esfuerzo": "medium",
                         "porque": "una sola llamada por video que decide el "
                                   "reparto y los sitios de todo el montaje; "
                                   "equivocarse aqui sale mucho mas caro que el "
                                   "escalon de esfuerzo"},
 
-    # Mirar una imagen por plano y decidir el grafismo. Es trabajo de juicio
-    # visual repetido muchas veces, no de razonamiento largo: medio sobra y el
-    # coste manda, porque son 174 imagenes en tandas de 24.
-    # Elegir que tramos se cuentan mejor con texto que con dibujo, y ESCRIBIR
-    # esa frase. Es lo contrario del de arriba: no mira ninguna imagen, mira el
-    # guion entero, y decide poco (tres o cuatro cartelas en treinta planos)
-    # pero cada decision es de criterio narrativo y ademas hay que redactarla.
-    # Ahi el esfuerzo si se nota, y como son una o dos llamadas por video, sale
-    # barato pagarlo.
-    # QUE SE VE EN CADA PLANO, con TODOS los planos delante. El trabajo no es
-    # describir un plano --eso lo hace cualquiera-- sino que cada uno se
-    # distinga del de al lado, y eso es comparar. Una o dos llamadas por video.
-    "direccion": {"modelo": "opus", "esfuerzo": "high",
+    "direccion": {"modelo": "gemini-4-argon", "esfuerzo": "high",
                   "porque": "el trabajo es COMPARAR unos planos con otros para "
                             "que no se repitan, no describir uno: es criterio "
                             "sobre el conjunto, y son una o dos llamadas por "
                             "video, asi que el esfuerzo alto sale barato"},
 
-    # EL PROMPT ENTERO DE CADA PLANO. Lo mismo que `direccion` un escalon mas
-    # arriba: alli el agente escribe una linea y el codigo la encaja entre el
-    # sitio, el reparto y el tono; aqui escribe el parrafo entero y ademas
-    # ELIGE el sitio entre los que su tramo pone a mano.
-    "redactor": {"modelo": "opus", "esfuerzo": "high",
+    "redactor": {"modelo": "gemini-4-argon", "esfuerzo": "high",
                  "porque": "escribe el encargo entero de cada plano y elige su "
                            "sitio entre los del tramo: son mas decisiones por "
                            "plano que dirigirlo, y sigue siendo una sola "
                            "llamada por video"},
 
-    "plan_cartelas": {"modelo": "sonnet", "esfuerzo": "high",
+    "plan_cartelas": {"modelo": "gemini-3.8-flash", "esfuerzo": "high",
                       "porque": "pocas decisiones por video pero de criterio "
                                 "narrativo, y ademas hay que redactar el texto: "
                                 "una o dos llamadas, el esfuerzo alto cuesta "
                                 "poco y se nota en lo que escribe"},
 
-    # MIRAR las imagenes ya generadas y decir cual esta mal. El unico agente que
-    # Reescribir UN bloque de unas 30 palabras aplicando una nota del revisor, y
-    # una llamada POR BLOQUE. Es el ejemplo de manual de lo que sale igual de
-    # bien en bajo, y ahi la latencia se multiplica por el numero de bloques.
-    "revision_audio": {"modelo": "haiku", "esfuerzo": "low",
+    "revision_audio": {"modelo": "gemini-3.8-flash", "esfuerzo": "low",
                        "porque": "reescribir 30 palabras con una nota concreta "
                                  "es de los casos que salen igual de bien en "
                                  "bajo, y se llama una vez por bloque"},
 
-    # Mirar capturas anotadas, decidir que cambiar y EDITAR ficheros del
-    # proyecto: flujo agentico con efectos en disco. La matriz apunta a maximo,
-    # pero el maximo esta medido como rendimientos decrecientes, y el alto da el
-    # 90-95 % por mucho menos.
-    "capturas_agente": {"modelo": "sonnet", "esfuerzo": "high",
+    "capturas_agente": {"modelo": "gemini-3.8-flash", "esfuerzo": "high",
                         "porque": "es agentico y toca ficheros: la matriz pide "
                                   "maximo, pero alto da el 90-95 % de esa "
                                   "calidad por una fraccion del gasto"},
 
-    # Mirar de 3 a 8 fotogramas y describir el estilo que comparten. Es
-    # observacion descriptiva, la categoria que sale bien en bajo.
-    "guia_estilo": {"modelo": "opus", "esfuerzo": "high",
+    "guia_estilo": {"modelo": "gemini-4-argon", "esfuerzo": "high",
                     "porque": "es la UNICA descripcion en palabras del dibujo de "
                               "este video, y la reciben todas las imagenes que se "
                               "generan: los planos y las hojas de personaje. Era "
@@ -378,47 +317,28 @@ POR_FASE = {
                               "trazo y se dejaba lo que mas canta, como se "
                               "resuelve una cara. Es UNA llamada por video"},
 
-    # Decidir, plano a plano, si la imagen que ya existe sigue valiendo con la
-    # frase nueva. Es comparar dos frases cortas y contestar si o no: en la
-    # matriz por tarea es clasificacion, que es la categoria que sale igual de
-    # bien en bajo. Y ademas tiene que ser BARATO: si analizar si se puede
-    # conservar cuesta mas que rehacerlo, nadie lo usaria.
-    "conservacion": {"modelo": "sonnet", "esfuerzo": "low",
+    "conservacion": {"modelo": "gemini-3.8-flash", "esfuerzo": "low",
                      "porque": "clasificar si dos frases piden la misma imagen "
                                "es de lo que sale igual de bien en bajo, y el "
                                "analisis tiene que costar menos que rehacer"},
 
-    # MIRAR LOS PLANOS GENERADOS Y DECIR CUAL CONTRADICE EL RELATO. Es la fase
-    # que mas criterio pide de todas las que miran imagenes: no es «esta bien
-    # dibujado», es «esto que se ve contradice lo que se esta contando». Hay que
-    # tener el guion entero en la cabeza y ademas resistirse a senalar lo que
-    # solo es mejorable, que es lo que convierte una revision util en una lista
-    # de la compra de cien reparaciones.
-    # REPARTIR EL REPASO EN CAMBIOS. Es la fase con mas consecuencias por
-    # decision: elegir mal el ambito de una nota puede volver a grabar la voz de
-    # un video entero para arreglar algo que era la musica. Y hay que saber lo
-    # que cuesta cada camino, que es lo que separa «arreglalo» de «arreglalo
-    # barato».
-    "repaso": {"modelo": "opus", "esfuerzo": "high",
+    "repaso": {"modelo": "gemini-4-argon", "esfuerzo": "high",
                "porque": "elegir el cambio mas barato que resuelve una nota "
                          "pide entender el pipeline entero: equivocarse de "
                          "ambito puede regrabar un video para bajar la musica"},
-    # El corrector de UN plano: lee la nota, abre las imagenes del inventario
-    # (el plano, sus vecinos, las hojas, las laminas) y decide que se adjunta y
-    # con que etiqueta. Es una imagen por llamada y la equivocacion se paga en
-    # imagenes: merece el modelo grande (pasos/corrector.py).
-    "corrector_imagen": {"modelo": "opus", "esfuerzo": "high",
+
+    "corrector_imagen": {"modelo": "gemini-4-argon", "esfuerzo": "high",
                          "porque": "entender una nota como «el mismo ordenador "
                                    "que en la escena anterior» exige mirar las "
                                    "imagenes y elegir bien que se adjunta; una "
                                    "eleccion mala se paga en imagenes"},
-
 }
 
 
 def _orden_modelo(nombre):
     """Cuanto sube un modelo en la escala. Los ids ya van de menos a mas."""
-    return MODELOS.index(nombre) if nombre in MODELOS else len(MODELOS)
+    norm = ALIAS_MODELOS.get(nombre, nombre)
+    return MODELOS.index(norm) if norm in MODELOS else len(MODELOS)
 
 
 def _orden_esfuerzo(nombre):
@@ -427,31 +347,16 @@ def _orden_esfuerzo(nombre):
 
 
 def por_defecto_de(fase):
-    """Lo que corre en esa fase si nadie elige. Hoy, lo mismo en todas.
-
-    MANDA EL DEFECTO DEL CANAL, no la recomendacion por fase. `POR_FASE` sigue
-    entera y no se borra ni una linea: es lo que cada fase NECESITARIA, medido y
-    razonado uno a uno, y sigue viajando en 'recomendado' para poder leerlo en la
-    pantalla y para el dia que se quiera volver a ella. Pero la decision del
-    canal es correr todo en Opus con esfuerzo muy alto, y una tabla que dice una
-    cosa mientras el sistema hace otra es la clase de discrepancia que acaba con
-    alguien depurando por que su seleccion no se aplica.
-
-    Volver al reparto por fase es devolver aqui `dict(ficha)`.
-    """
+    """Lo que corre en esa fase si nadie elige. Hoy, lo mismo en todas."""
     ficha = POR_FASE.get(str(fase))
     modelo, esfuerzo = MODELO_POR_DEFECTO, ESFUERZO_POR_DEFECTO
     porque = f"el canal corre todo en {modelo} con esfuerzo {esfuerzo}"
     if ficha:
-        # EL DEFECTO ES UN SUELO, NO UN TECHO. «Que todo corra en Opus Extra» es
-        # SUBIR lo que iba por debajo, no bajar lo que ya iba por encima: una
-        # fase que pide opus/max lo pide porque su fallo se arrastra, y aplicar
-        # el defecto a secas la habria rebajado en silencio. Se coge el mayor de
-        # los dos en cada eje.
-        modelo = max(modelo, ficha["modelo"], key=_orden_modelo)
+        modelo_ficha = normalizar_modelo(ficha["modelo"], estricto=False)
+        modelo = max(modelo, modelo_ficha, key=_orden_modelo)
         esfuerzo = max(esfuerzo, ficha["esfuerzo"], key=_orden_esfuerzo)
-        if (modelo, esfuerzo) != (ficha["modelo"], ficha["esfuerzo"]):
-            porque += (f"; para esta fase bastaria con {ficha['modelo']}/"
+        if (modelo, esfuerzo) != (modelo_ficha, ficha["esfuerzo"]):
+            porque += (f"; para esta fase bastaria con {modelo_ficha}/"
                        f"{ficha['esfuerzo']} ({ficha['porque']})")
         else:
             porque = ficha["porque"]
@@ -460,20 +365,14 @@ def por_defecto_de(fase):
 
 
 def catalogo():
-    """Lo que la interfaz necesita para pintar el selector, desde una sola fuente.
-
-    La UI ofrecia tres esfuerzos y el backend aceptaba cinco: dos listas que se
-    desincronizan solas. Esta es la lista, y la UI la pide.
-    """
+    """Lo que la interfaz necesita para pintar el selector, desde una sola fuente."""
     return {
         "modelos": [
-            {"id": "haiku", "nombre": "Haiku",
-             "nota": "el mas rapido y el mas barato; para trabajo mecanico"},
-            {"id": "sonnet", "nombre": "Sonnet",
-             "nota": "el equilibrio; suficiente para casi todo lo mecanico"},
-            {"id": "opus", "nombre": "Opus",
-             "nota": "el mas capaz y el mas lento; es el que usa el Estudio por "
-                     "defecto, para lo que hay que pensar"},
+            {"id": "gemini-3.8-flash", "nombre": "Gemini 3.8 Flash",
+             "nota": "rapido y eficiente; para trabajo estructurado y clasificacion"},
+            {"id": "gemini-4-argon", "nombre": "Gemini 4 Argon",
+             "nota": "el mas capaz en razonamiento y redaccion; es el que usa el "
+                     "Estudio por defecto, para lo que hay que pensar"},
         ],
         "esfuerzos": [
             {"id": "low", "nombre": "Bajo",
@@ -507,26 +406,19 @@ def clave_ajuste(modelo, esfuerzo):
 # -------------------------------------------------------------------- proceso
 
 def localizar(para="el Estudio"):
-    """Ruta del ejecutable del CLI de Claude."""
-    for nombre in ("claude.cmd", "claude.exe", "claude"):
+    """Ruta del ejecutable del CLI (`agy`, con respaldo a `claude`)."""
+    for nombre in ("agy.cmd", "agy.exe", "agy", "claude.cmd", "claude.exe", "claude"):
         ruta = shutil.which(nombre)
         if ruta:
             return ruta
     raise RuntimeError(
-        f"no se encuentra el CLI de claude en el PATH y {para} lo necesita "
-        f"(instalalo con 'npm i -g @anthropic-ai/claude-code')")
+        f"no se encuentra el CLI `agy` en el PATH y {para} lo necesita "
+        f"(instalalo o anade ~/.gemini/bin al PATH)")
 
 
 def entorno(cuenta=None):
     """Entorno del hijo: sin lo que le cambia el razonamiento y sin lo que lo
     sacaria de la suscripcion.
-
-    `cuenta` es una ficha {etiqueta, config_dir} del almacen de claves. Una
-    cuenta del CLI NO es una clave: es un LOGIN, y un login del CLI vive en su
-    carpeta de configuracion. Por eso cambiar de cuenta es cambiar
-    CLAUDE_CONFIG_DIR y nada mas -- meter aqui una ANTHROPIC_API_KEY convertiria
-    todo el Estudio en pago por uso sin que nadie se entere, que es justo lo que
-    PAGO_POR_USO existe para impedir.
     """
     limpio = dict(os.environ)
     for clave in ENTORNO_FUERA + PAGO_POR_USO:
@@ -534,6 +426,7 @@ def entorno(cuenta=None):
     carpeta = (cuenta or {}).get("config_dir") if isinstance(cuenta, dict) else None
     if carpeta:
         limpio["CLAUDE_CONFIG_DIR"] = carpeta
+        limpio["AGY_CONFIG_DIR"] = carpeta
     return limpio
 
 
@@ -729,6 +622,115 @@ def _una_pasada(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
     return resultado
 
 
+def _adaptar_orden_agy(orden, instruccion):
+    """Traduce la lista canonica de `construir_orden` a los flags nativos de `agy`.
+
+    `agy` entra en modo print automaticamente al recibir el prompt por stdin
+    (sin `-p`, que en `agy` exige argumento propio) y recibe permisos de
+    herramientas en `--settings` JSON y reanudacion en `--conversation`.
+    """
+    import json
+
+    if not orden:
+        return orden, instruccion
+    binario = os.path.basename(str(orden[0])).lower()
+    if not binario.startswith("agy"):
+        return orden, instruccion
+
+    nueva = [orden[0]]
+    permitidas = []
+    vetadas = []
+    sistema_extra = []
+    i = 1
+    while i < len(orden):
+        arg = orden[i]
+        if arg == "-p":
+            i += 1
+            continue
+        if arg == "--strict-mcp-config":
+            nueva.append("--disable-slash-commands")
+            i += 1
+            continue
+        if arg == "--allowedTools" and i + 1 < len(orden):
+            permitidas.extend(
+                h.strip() for h in str(orden[i + 1]).split(",") if h.strip()
+            )
+            i += 2
+            continue
+        if arg == "--disallowedTools" and i + 1 < len(orden):
+            vetadas.extend(
+                h.strip() for h in str(orden[i + 1]).split(",") if h.strip()
+            )
+            i += 2
+            continue
+        if arg == "--append-system-prompt" and i + 1 < len(orden):
+            if str(orden[i + 1]).strip():
+                sistema_extra.append(str(orden[i + 1]).strip())
+            i += 2
+            continue
+        if arg == "--permission-mode" and i + 1 < len(orden):
+            modo_raw = str(orden[i + 1]).strip()
+            mapa_modos = {
+                "acceptedits": "accept-edits",
+                "accept-edits": "accept-edits",
+                "auto": "auto",
+                "plan": "plan",
+            }
+            modo_agy = mapa_modos.get(modo_raw.lower())
+            if modo_agy:
+                nueva += ["--mode", modo_agy]
+            i += 2
+            continue
+        if arg == "--resume" and i + 1 < len(orden):
+            nueva += ["--conversation", str(orden[i + 1])]
+            i += 2
+            continue
+        if arg == "--mcp-config" and i + 1 < len(orden):
+            i += 2
+            continue
+        nueva.append(arg)
+        i += 1
+
+    if permitidas or vetadas:
+        permisos_cfg = {}
+        if permitidas:
+            permisos_cfg["allow"] = permitidas
+        if vetadas:
+            permisos_cfg["deny"] = vetadas
+        nueva += [
+            "--settings",
+            json.dumps({"permissions": permisos_cfg}, ensure_ascii=False),
+        ]
+
+    texto_entrada = instruccion or ""
+    if sistema_extra:
+        bloque_sis = "\n".join(sistema_extra)
+        texto_entrada = f"<system>\n{bloque_sis}\n</system>\n\n{texto_entrada}"
+    return nueva, texto_entrada
+
+
+def _normalizar_sobre_agy(sobre):
+    """Unifica el sobre JSON de `agy` con los campos que esperan los pasos y coste."""
+    if not isinstance(sobre, dict):
+        return sobre
+    if "result" not in sobre and "response" in sobre:
+        sobre["result"] = sobre.get("response") or ""
+    if not sobre.get("session_id") and sobre.get("conversation_id"):
+        sobre["session_id"] = sobre["conversation_id"]
+    if "is_error" not in sobre and str(sobre.get("status") or "").upper() == "ERROR":
+        sobre["is_error"] = True
+    if sobre.get("is_error") and not str(sobre.get("result") or "").strip():
+        if sobre.get("error"):
+            sobre["result"] = str(sobre["error"])
+    if not sobre.get("stop_reason") and sobre.get("finished_reason"):
+        sobre["stop_reason"] = sobre["finished_reason"]
+    if "duration_ms" not in sobre and isinstance(
+        sobre.get("duration_seconds"), (int, float)
+    ):
+        sobre["duration_ms"] = int(round(float(sobre["duration_seconds"]) * 1000))
+    return sobre
+
+
 def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
                       sistema, herramientas_vetadas, permisos, extra, avance,
                       consejos_extra, para, cuenta, herramientas_permitidas=()):
@@ -739,18 +741,19 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
                             herramientas_vetadas=herramientas_vetadas,
                             permisos=permisos, extra=extra,
                             herramientas_permitidas=herramientas_permitidas)
+    orden_real, instruccion_real = _adaptar_orden_agy(orden, instruccion)
     try:
         # en Linux, en su propio grupo de procesos: es lo que deja a
         # `matar_arbol` cerrar tambien sus hijos
         grupo = {} if os.name == "nt" else {"start_new_session": True}
-        proceso = subprocess.Popen(orden, stdin=subprocess.PIPE,
+        proceso = subprocess.Popen(orden_real, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE,
                                    cwd=cwd, env=entorno(cuenta), **SIN_VENTANA,
                                    **grupo)
     except OSError as fallo:
         raise RuntimeError(
-            f"no se ha podido lanzar el CLI de claude: {fallo}") from fallo
+            f"no se ha podido lanzar el CLI: {fallo}") from fallo
 
     if avance is not None:
         avance.al_cancelar = lambda: matar_arbol(proceso)
@@ -758,63 +761,63 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
     arranque = time.time()
     try:
         crudo, error_crudo = proceso.communicate(
-            (instruccion or "").encode("utf-8"), timeout=techo)
+            (instruccion_real or "").encode("utf-8"), timeout=techo)
     except subprocess.TimeoutExpired as fallo:
         matar_arbol(proceso)
         consejos = list(consejos_extra or [])
         if esfuerzo != "low":
             consejos.insert(0, f"baja 'esfuerzo' de '{esfuerzo}' a 'low': es lo "
                                f"que mas alarga la espera")
-        consejos.append("comprueba que 'claude -p' contesta a mano desde una consola")
+        consejos.append("comprueba que 'agy -p hola' contesta a mano desde una consola")
         consejos.append(f"sube 'tiempo_max_s' por encima de {techo} si el trabajo "
                         f"es largo de verdad")
         raise TiempoAgotado(
-            f"el CLI de claude no ha respondido en {techo} s y se ha cortado "
+            f"el CLI no ha respondido en {techo} s y se ha cortado "
             f"{para} (se ha matado el proceso y sus hijos). Que probar: "
             + "; ".join(consejos) + ".") from fallo
 
     segundos = time.time() - arranque
     if avance is not None and getattr(avance, "cancelado", False):
-        raise RuntimeError(f"{para} se cancelo mientras esperaba al CLI de claude")
+        raise RuntimeError(f"{para} se cancelo mientras esperaba al CLI")
 
     salida = crudo.decode("utf-8", errors="replace")
     error = error_crudo.decode("utf-8", errors="replace").strip()
     import json
     if proceso.returncode != 0:
         # El CLI sale con codigo 1 y AUN ASI escribe su sobre JSON: el motivo
-        # de verdad esta en `result`. Sin mirarlo, un cupo agotado llegaba a la
-        # pantalla como 600 caracteres de JSON.
+        # de verdad esta en `result` (o `error`/`response` en `agy`).
         motivo = ""
         try:
-            motivo = str(json.loads(salida).get("result") or "").strip()
+            sobre_err = _normalizar_sobre_agy(json.loads(salida))
+            motivo = str(sobre_err.get("result") or sobre_err.get("error") or "").strip()
         except (ValueError, AttributeError):
             motivo = ""
-        limite = limite_de(motivo)
+        limite = limite_de(motivo or error)
         if limite:
             raise LimiteAgotado(
-                f"se ha agotado el cupo de la suscripcion de Claude y no se "
+                f"se ha agotado el cupo de la suscripcion del CLI y no se "
                 f"puede hacer {para}: {limite}")
         raise RuntimeError(
-            f"el CLI de claude fallo (codigo {proceso.returncode}) despues de "
+            f"el CLI fallo (codigo {proceso.returncode}) despues de "
             f"{int(segundos)} s: {(motivo or error or salida)[:600] or 'sin mensaje'}")
     try:
-        sobre = json.loads(salida)
+        sobre = _normalizar_sobre_agy(json.loads(salida))
     except ValueError as fallo:
         raise RuntimeError(
-            f"el CLI de claude no devolvio JSON: {salida[:600] or '(vacio)'}") from fallo
+            f"el CLI no devolvio JSON: {salida[:600] or '(vacio)'}") from fallo
     if not isinstance(sobre, dict):
-        raise RuntimeError(f"respuesta inesperada del CLI de claude: {salida[:600]}")
+        raise RuntimeError(f"respuesta inesperada del CLI: {salida[:600]}")
     if sobre.get("is_error"):
         limite = limite_de(sobre.get("result"))
         if limite:
             raise LimiteAgotado(
-                f"se ha agotado el cupo de la suscripcion de Claude y no se "
+                f"se ha agotado el cupo de la suscripcion del CLI y no se "
                 f"puede hacer {para}: {limite}")
         raise RuntimeError(
-            f"el CLI de claude devolvio error: {str(sobre.get('result'))[:600]}")
+            f"el CLI devolvio error: {str(sobre.get('result'))[:600]}")
     texto = sobre.get("result")
     if not isinstance(texto, str) or not texto.strip():
-        raise RuntimeError("el CLI de claude devolvio una respuesta vacia")
+        raise RuntimeError("el CLI devolvio una respuesta vacia")
 
     # El sobre del CLI no dice con que esfuerzo se le hablo, y el esfuerzo es la
     # variable que mas mueve el tiempo: si no se estampa aqui, el medidor de

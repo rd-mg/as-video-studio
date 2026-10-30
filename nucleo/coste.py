@@ -626,7 +626,8 @@ def reportar_claude(sobre, operacion="cli", unidad=None, detalle=None):
     sobre = sobre if isinstance(sobre, dict) else {}
     usage = sobre.get("usage") if isinstance(sobre.get("usage"), dict) else {}
     cache = (int(usage.get("cache_creation_input_tokens") or 0)
-             + int(usage.get("cache_read_input_tokens") or 0))
+             + int(usage.get("cache_read_input_tokens") or 0)
+             + int(usage.get("cache_read_tokens") or 0))
     ficha = {}
     if sobre.get("model"):
         ficha["modelo"] = sobre["model"]

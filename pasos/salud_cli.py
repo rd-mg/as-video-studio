@@ -76,7 +76,7 @@ _SESION = ("not logged in", "no est", "log in", "login", "authenticat", "oauth",
 #: Lo que se le manda en la prueba. Corto a proposito: lo que se mide es si la
 #: cuenta contesta, no que contesta.
 INSTRUCCION_PRUEBA = "Contesta solo con la palabra: ok"
-MODELO_PRUEBA = "haiku"
+MODELO_PRUEBA = "gemini-3.8-flash"
 ESFUERZO_PRUEBA = "low"
 TIEMPO_PRUEBA_S = 90
 

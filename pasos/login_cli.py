@@ -99,14 +99,18 @@ CADUCIDAD_INTENTO_S = 20 * 60
 
 #: De donde se saca el enlace de la salida del CLI. Se busca la URL a pelo y no
 #: la frase que la precede: la frase es copy y cambia, la URL es la URL.
-_ENLACE = re.compile(r"https://\S*claude\.com/\S*oauth\S*", re.I)
+_ENLACE = re.compile(
+    r"https://\S*(?:claude\.com/\S*oauth|accounts\.google\.com/o/oauth2)\S*",
+    re.I,
+)
 
 #: La linea con la que el CLI explica un fallo.
-_FALLO = re.compile(r"^\s*(Login failed:.*|Error:.*)$", re.M)
+_FALLO = re.compile(r"^\s*(Login failed:.*|Error:.*|Authentication failed.*)$", re.M | re.I)
 
 #: Lo que el CLI escribe DELANTE del hueco donde espera el codigo. Sirve para
 #: quedarse solo con lo que dijo despues de que se le pasara uno.
 _PIDE = "Paste code here if prompted"
+_PIDE_AGY = "Or, paste the authorization code here and press Enter:"
 
 _LOCK = threading.RLock()
 #: id de cuenta -> Intento. Vive en memoria a proposito: recargar la pagina
@@ -125,10 +129,23 @@ def _ultima_linea(texto):
     pegada detras del «Paste code here if prompted > » de la misma linea.
     """
     for linea in reversed(str(texto or "").splitlines()):
-        limpia = linea.split(_PIDE, 1)[-1].lstrip("> ").strip()
+        limpia = linea.split(_PIDE, 1)[-1].split(_PIDE_AGY, 1)[-1].lstrip("> :").strip()
         if limpia:
             return limpia
     return ""
+
+
+def _es_agy(ejecutable=None):
+    exe = ejecutable or _ejecutable()
+    return os.path.basename(str(exe)).lower().startswith("agy")
+
+
+def _entorno_cuenta(carpeta=""):
+    entorno = cli_claude.entorno({"config_dir": carpeta} if carpeta else None)
+    if carpeta and _es_agy():
+        entorno["HOME"] = carpeta
+        entorno["USERPROFILE"] = carpeta
+    return entorno
 
 
 # ------------------------------------------------------------------ carpetas
@@ -153,15 +170,28 @@ def situacion(carpeta=""):
 
     -> {"conectada": bool, "correo": str, "plan": str, "metodo": str,
         "error": str}
-
-    `carpeta` vacia = la sesion por defecto del CLI (`~/.claude`).
-
-    Se pregunta y no se deduce del disco: mirar si hay un `.credentials.json`
-    diria «si» de un login caducado, y un login caducado es exactamente el caso
-    en el que hace falta enterarse.
     """
-    orden = [_ejecutable(), "auth", "status", "--json"]
-    entorno = cli_claude.entorno({"config_dir": carpeta} if carpeta else None)
+    exe = _ejecutable()
+    entorno = _entorno_cuenta(carpeta)
+    if _es_agy(exe):
+        try:
+            proceso = subprocess.run([exe, "models"], capture_output=True, timeout=60,
+                                     env=entorno, **cli_claude.SIN_VENTANA)
+        except (OSError, subprocess.TimeoutExpired) as fallo:
+            return {"conectada": False, "correo": "", "plan": "", "metodo": "",
+                    "error": f"no se ha podido preguntar al CLI: {fallo}"}
+        salida = ((proceso.stdout or b"") + (proceso.stderr or b"")).decode(
+            "utf-8", errors="replace").strip()
+        conectada = proceso.returncode == 0 and "authentication required" not in salida.lower()
+        return {
+            "conectada": conectada,
+            "correo": "sesion activa" if conectada else "",
+            "plan": "Antigravity" if conectada else "",
+            "metodo": "agy" if conectada else "",
+            "error": "",
+        }
+
+    orden = [exe, "auth", "status", "--json"]
     try:
         proceso = subprocess.run(orden, capture_output=True, timeout=60,
                                  env=entorno, **cli_claude.SIN_VENTANA)
@@ -189,19 +219,22 @@ def situacion(carpeta=""):
 
 
 def salir(carpeta):
-    """Cierra la sesion de esa carpeta. -> (ok, mensaje)
-
-    La carpeta por defecto NO se acepta aqui: es la sesion con la que el usuario
-    tiene su consola abierta, y echarle de ella desde una pantalla del Estudio
-    seria un efecto que nadie pidio.
-    """
+    """Cierra la sesion de esa carpeta. -> (ok, mensaje)"""
     if not str(carpeta or "").strip():
         raise ErrorLogin(
             "esta cuenta usa la sesion por defecto del CLI, que es la misma con "
             "la que tienes tu consola abierta. Salir de ahi desde aqui te "
             "echaria tambien de tu terminal: entra con esta cuenta y el Estudio "
             "le dara su propia carpeta, y entonces ya se podra cerrar.")
-    orden = [_ejecutable(), "auth", "logout"]
+    exe = _ejecutable()
+    if _es_agy(exe):
+        import shutil as _shutil
+        for sub in (".gemini", ".config"):
+            ruta_sub = os.path.join(carpeta, sub)
+            if os.path.exists(ruta_sub):
+                _shutil.rmtree(ruta_sub, ignore_errors=True)
+        return True, "sesion cerrada"
+    orden = [exe, "auth", "logout"]
     entorno = cli_claude.entorno({"config_dir": carpeta})
     try:
         proceso = subprocess.run(orden, capture_output=True, timeout=60,
@@ -266,19 +299,24 @@ class Intento:
             self._trozos.append(trozo)
 
     def arrancar(self):
+        exe = _ejecutable()
         entorno = cli_claude.entorno({"config_dir": self.carpeta})
+        if self.carpeta and _es_agy(exe):
+            entorno["HOME"] = self.carpeta
+            entorno["USERPROFILE"] = self.carpeta
         # NO ABRIR NAVEGADOR: medido, sin esto sale un Edge en la maquina. Ver
         # la cabecera del modulo.
         entorno["BROWSER"] = "none"
+        orden_login = [exe, "-p", "ok"] if _es_agy(exe) else [exe, "auth", "login", "--claudeai"]
         try:
             self.proceso = subprocess.Popen(
-                [_ejecutable(), "auth", "login", "--claudeai"],
+                orden_login,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, cwd=self.carpeta, env=entorno,
                 **cli_claude.SIN_VENTANA)
         except OSError as fallo:
             raise ErrorLogin(
-                f"no se ha podido lanzar el CLI de claude: {fallo}") from fallo
+                f"no se ha podido lanzar el CLI: {fallo}") from fallo
         threading.Thread(target=self._bombear, daemon=True).start()
 
         limite = time.time() + ESPERA_ENLACE_S

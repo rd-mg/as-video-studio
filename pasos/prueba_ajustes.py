@@ -68,10 +68,16 @@ def seccion(titulo):
 def prueba_validacion():
     seccion("1] un ajuste imposible se rechaza antes de lanzar el CLI")
 
-    igual(cli_claude.normalizar_modelo("sonnet"), "sonnet", "acepta un alias")
-    igual(cli_claude.normalizar_modelo("  OPUS  "), "opus",
+    igual(cli_claude.normalizar_modelo("gemini-3.8-flash"), "gemini-3.8-flash",
+          "acepta gemini-3.8-flash")
+    igual(cli_claude.normalizar_modelo("  GEMINI-4-ARGON  "), "gemini-4-argon",
           "normaliza espacios y mayusculas")
-    igual(cli_claude.normalizar_modelo("claude-opus-5"), "claude-opus-5",
+    igual(cli_claude.normalizar_modelo("sonnet"), "gemini-3.8-flash",
+          "traduce el alias heredado sonnet a gemini-3.8-flash")
+    igual(cli_claude.normalizar_modelo("opus"), "gemini-4-argon",
+          "traduce el alias heredado opus a gemini-4-argon")
+    igual(cli_claude.normalizar_modelo("gemini-4-argon-preview"),
+          "gemini-4-argon-preview",
           "acepta un id completo, porque el catalogo cambia mas que el codigo")
     falla(lambda: cli_claude.normalizar_modelo("sonet"), "desconocido",
           "rechaza un modelo mal escrito")
@@ -84,11 +90,11 @@ def prueba_validacion():
     igual(cli_claude.normalizar_esfuerzo(""), cli_claude.ESFUERZO_POR_DEFECTO,
           "vacio significa el valor por defecto, no un error")
     igual((cli_claude.MODELO_POR_DEFECTO, cli_claude.ESFUERZO_POR_DEFECTO),
-          ("opus", "xhigh"),
-          "y el defecto del canal es opus con esfuerzo muy alto (21-08-2026)")
+          ("gemini-4-argon", "xhigh"),
+          "y el defecto del canal es gemini-4-argon con esfuerzo muy alto")
 
     catalogo = cli_claude.catalogo()
-    comprobar(len(catalogo["modelos"]) >= 3 and len(catalogo["esfuerzos"]) == 5,
+    comprobar(len(catalogo["modelos"]) >= 2 and len(catalogo["esfuerzos"]) == 5,
               f"el catalogo publica {len(catalogo['modelos'])} modelos y "
               f"{len(catalogo['esfuerzos'])} esfuerzos")
     comprobar(all(e.get("nota") for e in catalogo["esfuerzos"]),
@@ -104,13 +110,8 @@ def prueba_tiempo():
     plazos = [cli_claude.tiempo_max(e, base_s=420) for e in cli_claude.ESFUERZOS]
     comprobar(plazos == sorted(plazos) and len(set(plazos)) > 1,
               f"sube con el esfuerzo: {dict(zip(cli_claude.ESFUERZOS, plazos))}")
-    # El PLAZO se deriva del modelo Y del esfuerzo, y `base_s` esta calibrado
-    # sobre sonnet/low: por eso hay que nombrar el modelo para fijar la
-    # referencia. Sin nombrarlo manda el defecto del canal, que desde el
-    # 21-08-2026 es opus -- y entonces hasta una llamada de esfuerzo bajo tiene
-    # mas plazo, que es lo correcto: tarda mas.
-    igual(cli_claude.tiempo_max("low", base_s=420, modelo="sonnet"), 420,
-          "con sonnet y esfuerzo bajo se queda en el plazo de siempre")
+    igual(cli_claude.tiempo_max("low", base_s=420, modelo="gemini-3.8-flash"), 420,
+          "con gemini-3.8-flash y esfuerzo bajo se queda en el plazo de siempre")
     comprobar(cli_claude.tiempo_max("low", base_s=420) > 420,
               "y sin nombrar modelo manda el defecto del canal, que da mas plazo")
     comprobar(cli_claude.tiempo_max("high", base_s=420) > 420,
@@ -131,12 +132,23 @@ def prueba_tiempo():
 def prueba_orden():
     seccion("3] la orden del CLI se arma en un unico sitio")
 
-    orden = cli_claude.construir_orden("opus", "high", sistema="una linea")
+    orden = cli_claude.construir_orden("gemini-4-argon", "high", sistema="una linea")
     for bandera in ("--model", "--effort", "--output-format",
                     "--strict-mcp-config"):
         comprobar(bandera in orden, f"la orden lleva {bandera}")
-    igual(orden[orden.index("--model") + 1], "opus", "y el modelo elegido")
+    igual(orden[orden.index("--model") + 1], "gemini-4-argon", "y el modelo elegido")
     igual(orden[orden.index("--effort") + 1], "high", "y el esfuerzo elegido")
+
+    orden_agy, entrada_agy = cli_claude._adaptar_orden_agy(
+        ["/usr/bin/agy"] + orden[1:] + ["--resume", "conv-1", "--permission-mode", "acceptEdits"],
+        "encargo",
+    )
+    comprobar("-p" not in orden_agy and "--disable-slash-commands" in orden_agy,
+              "para agy adapta flags y lee stdin sin -p")
+    comprobar("--conversation" in orden_agy and "--mode" in orden_agy,
+              "traduce --resume a --conversation y --permission-mode a --mode")
+    comprobar("<system>" in entrada_agy and "una linea" in entrada_agy,
+              "inyecta el prompt de sistema en la entrada de agy")
 
     falla(lambda: cli_claude.construir_orden(sistema="dos\nlineas"),
           "una sola linea",
@@ -174,7 +186,7 @@ def prueba_ejecucion():
     original_popen = subprocess.Popen
     original_which = shutil.which
     original_cuentas = cli_claude.cuentas
-    shutil.which = lambda nombre: r"C:\falso\claude.cmd"
+    shutil.which = lambda nombre: r"C:\falso\agy.cmd"
     # UNA SOLA CUENTA, siempre. Esta prueba mide que UNA pasada falla limpio, y
     # sin fijarlo leeria el almacen de verdad: en una maquina con tres cuentas
     # logueadas los tres casos de fallo correrian tres veces cada uno, y el
@@ -182,11 +194,15 @@ def prueba_ejecucion():
     cli_claude.cuentas = lambda: [{"etiqueta": "", "config_dir": ""}]
     try:
         subprocess.Popen = lambda *a, **k: ProcesoFalso(
-            {"result": "hecho", "usage": {"output_tokens": 12}})
-        texto, sobre = cli_claude.ejecutar("hola", modelo="opus",
+            {"response": "hecho", "conversation_id": "c1",
+             "status": "SUCCESS", "duration_seconds": 1.2,
+             "usage": {"output_tokens": 12}})
+        texto, sobre = cli_claude.ejecutar("hola", modelo="gemini-4-argon",
                                            esfuerzo="medium")
-        igual(texto, "hecho", "devuelve el texto de la respuesta")
-        igual(sobre["_ajuste"]["modelo"], "opus",
+        igual(texto, "hecho", "devuelve el texto de la respuesta (response de agy)")
+        igual(sobre.get("session_id"), "c1",
+              "normaliza conversation_id de agy a session_id")
+        igual(sobre["_ajuste"]["modelo"], "gemini-4-argon",
               "y estampa el modelo en el sobre")
         igual(sobre["_ajuste"]["esfuerzo"], "medium",
               "y el esfuerzo, que el CLI NO devuelve y es lo que mas mueve el "
@@ -508,9 +524,9 @@ def prueba_recomendacion(carpeta):
     estadisticas.valorar("guion", "bien",
                          ajuste={"modelo": "opus", "esfuerzo": "high"})
     valorada = estadisticas.recomendacion("guion", 9000)
-    igual(valorada["ajuste"]["modelo"], "opus",
+    igual(valorada["ajuste"]["modelo"], "gemini-4-argon",
           "valorado el resultado, recomienda el que gusto aunque sea 6 veces "
-          "mas lento: lo mas rapido siempre seria haiku/low y eso no es un "
+          "mas lento: lo mas rapido siempre seria gemini-3.8-flash/low y eso no es un "
           "consejo, es una tautologia")
 
     tabla = estadisticas.comparativa("guion", 9000)
