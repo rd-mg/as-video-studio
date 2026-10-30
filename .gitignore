@@ -37,3 +37,8 @@ node_modules/
 # NOTAS INTERNAS de quien lo desarrolla (estado, despliegues, cuentas): se
 # quedan en su maquina y no viajan en el repositorio publico.
 docs/RETOMAR.md
+# Local AI runtime state
+.atl/
+.agents/
+
+skills-lock.json
