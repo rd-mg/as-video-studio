@@ -26,6 +26,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
+from PIL import Image
 
 MODELO = "gemini-nano-banana-2.1"
 API_URL = (
