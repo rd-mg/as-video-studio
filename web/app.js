@@ -2382,7 +2382,7 @@ function seccionCalidadImagen() {
   const porcentaje = base.usd_total
     ? Math.round(100 * base.usd_referencias / base.usd_total) : 0;
   caja.appendChild(h('div', { clase: 'pista' },
-    'Lo que se ve aqui NO es el precio de OpenAI: es lo que cuesta el plano '
+    'Lo que se ve aqui NO es el precio base de Google AI (Nano Banana 2.1): es lo que cuesta el plano '
     + 'entero. A cada imagen se le adjuntan sus referencias de estilo, reparto y '
     + `continuidad, y esas se pagan aparte — en la calidad baja son el ${porcentaje} % `
     + 'del gasto. Por eso subir de calidad cuesta bastante menos de lo que '
@@ -2428,7 +2428,7 @@ function seccionOpenAI(ficha) {
   const viva = cuenta ? porCola[cuenta.cola] : null;
   const campo = h('input', {
     type: 'password',
-    placeholder: puesta ? `puesta (${cuenta.cola})` : 'sk-…',
+    placeholder: puesta ? `puesta (${cuenta.cola})` : 'AIza…',
   });
 
   const caja = h('section', { clase: 'bloque-config' },
@@ -2455,7 +2455,7 @@ function seccionOpenAI(ficha) {
       (puesta ? h('button', {
         clase: 'mini fantasma peligro',
         onclick: () => {
-          if (!window.confirm('¿Quitar la clave de OpenAI? Sin ella no se '
+          if (!window.confirm('¿Quitar la clave de Google AI (GEMINI_API_KEY)? Sin ella no se '
             + 'pueden generar imágenes.')) return;
           guardarClaves({ openai: [] });
         },
@@ -2685,8 +2685,8 @@ async function probarCuentaCLI(cid) {
    que no cuestan dinero. Es el mismo bloque en Configuración y en la última
    tarjeta de la guía. */
 const NOMBRES_PROVEEDOR = {
-  openai: 'OpenAI — imágenes', cartesia: 'Cartesia — voz', jamendo: 'Jamendo — música',
-  freesound: 'FreeSound — efectos', claude: 'Claude',
+  openai: 'Google AI (Nano Banana 2.1) — imágenes', cartesia: 'Cartesia — voz', jamendo: 'Jamendo — música',
+  freesound: 'FreeSound — efectos', claude: 'Antigravity CLI (Gemini)',
 };
 
 function bloquePruebaClaves() {
@@ -2702,7 +2702,7 @@ function bloquePruebaClaves() {
     h('div', { clase: 'pista' },
       '«Puesta» no es «funciona». Esto le habla a cada servicio con una llamada '
       + 'que no cuesta dinero y dice cuál autentica y cuál no. Lo único que no '
-      + 'puede saber es si OpenAI tiene saldo: eso se mira en su Billing.'));
+      + 'puede saber es si Google AI tiene saldo/facturación activa: eso se mira en Google AI Studio.'));
   const pruebas = vista.pruebas;
   if (pruebas) {
     pruebas.forEach(p => {
@@ -3754,12 +3754,12 @@ function pintarCoste() {
   const voz = proveedorDe(datos, 'tts');
   const cli = proveedorDe(datos, 'claude_cli');
 
-  nodo.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'OpenAI'), importeCoste(abierto),
+  nodo.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'Google AI'), importeCoste(abierto),
     h('span', { clase: 'meta' }, `${corto(abierto.tokens.total)} tok`)));
   nodo.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'TTS'), importeCoste(voz),
     h('span', { clase: 'meta' }, `${corto(voz.cantidad.caracteres)} car`)));
-  // Claude va sin importe y no entra en el TOTAL
-  nodo.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'Claude'),
+  // Gemini CLI va sin importe y no entra en el TOTAL
+  nodo.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'Gemini'),
     h('span', { clase: 'meta', title: 'va contra la suscripción: no suma al total' },
       `${corto(cli.tokens.total)} tok`)));
   nodo.appendChild(h('span', { clase: 'prov total' }, h('b', {}, 'TOTAL'),
@@ -3876,8 +3876,8 @@ async function pintarDesgloseCoste() {
   };
 
   const tabla = h('table', { clase: 'tabla coste-pasos' },
-    h('tr', {}, h('th', {}, 'Paso'), h('th', {}, 'OpenAI'), h('th', {}, ''),
-      h('th', {}, 'TTS'), h('th', {}, ''), h('th', {}, 'Claude'), h('th', {}, 'Total')));
+    h('tr', {}, h('th', {}, 'Paso'), h('th', {}, 'Google AI'), h('th', {}, ''),
+      h('th', {}, 'TTS'), h('th', {}, ''), h('th', {}, 'Gemini'), h('th', {}, 'Total')));
   for (const ficha of (porPaso && listaDe(porPaso.pasos)) || []) {
     if (!ficha.eventos) continue;
     tabla.appendChild(h('tr', {}, h('th', {}, ficha.nombre || ficha.paso || 'sin paso'), fila(ficha)));
@@ -3935,7 +3935,7 @@ async function pintarDesgloseCoste() {
     h('div', { clase: 'pista', estilo: 'margin-top:10px' },
       h('span', { clase: 'usd derivado' }, '$0.00'), ' importe derivado de la tabla de tarifas · ',
       h('span', { clase: 'usd medido' }, '$0.00'), ' importe medido · ',
-      'Claude se mide solo en tokens y no suma al TOTAL: va contra la suscripción.')));
+      'Gemini (Antigravity CLI) se mide solo en tokens y no suma al TOTAL: va contra la suscripción.')));
 }
 
 function conmutarCoste() {
@@ -6937,8 +6937,8 @@ function costeLightAhora() {
       : null));
   caja.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'Voz'),
     importeCoste(voz, true)));
-  // Claude va sin importe y no entra en el TOTAL
-  caja.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'Claude'),
+  // Gemini CLI va sin importe y no entra en el TOTAL
+  caja.appendChild(h('span', { clase: 'prov' }, h('b', {}, 'Gemini'),
     h('span', { clase: 'meta', title: 'va contra la suscripción: no suma al total' },
       `${corto(cli.tokens.total)} tok`)));
   caja.appendChild(h('span', { clase: 'prov total' }, h('b', {}, 'Total'),
@@ -10780,8 +10780,8 @@ const INICIO = { abierta: false, paso: 0, arrancando: false, accesoFallido: '' }
    ve Configuración). */
 const TARJETAS_INICIO = [
   { id: 'bienvenida', titulo: 'Bienvenido a AS Video Studio', pinta: tarjetaBienvenidaInicio },
-  { id: 'claude', titulo: '1 · Tu cuenta de Claude', pinta: tarjetaClaudeInicio },
-  { id: 'openai', titulo: '2 · La clave de OpenAI (imágenes)', pinta: tarjetaOpenAIInicio },
+  { id: 'claude', titulo: '1 · Tu cuenta de Antigravity CLI (Gemini)', pinta: tarjetaClaudeInicio },
+  { id: 'openai', titulo: '2 · La clave de Google AI (imágenes)', pinta: tarjetaOpenAIInicio },
   { id: 'cartesia', titulo: '3 · La clave de Cartesia (voz)', pinta: tarjetaCartesiaInicio },
   { id: 'jamendo', titulo: '4 · La clave de Jamendo (música, opcional)', pinta: tarjetaJamendoInicio },
   { id: 'freesound', titulo: '5 · La clave de FreeSound (efectos, opcional)', pinta: tarjetaFreeSoundInicio },
@@ -10897,9 +10897,9 @@ function tarjetaBienvenidaInicio() {
       + 'cada uno pide su llave. Esta guía te lleva a por ellas una a una, con el '
       + 'enlace de cada sitio.'),
     h('ol', { clase: 'inicio-pasos' },
-      h('li', {}, h('b', {}, 'Claude'), ': tu cuenta, no una clave. Escribe el guion, el '
+      h('li', {}, h('b', {}, 'Antigravity CLI (Gemini)'), ': tu cuenta, no una clave. Escribe el guion, el '
         + 'catálogo visual y los rótulos, y mueve al asistente de la burbuja.'),
-      h('li', {}, h('b', {}, 'OpenAI'), ': con ella se dibujan los planos.'),
+      h('li', {}, h('b', {}, 'Google AI (Nano Banana 2.1)'), ': con ella se dibujan los planos.'),
       h('li', {}, h('b', {}, 'Cartesia'), ': la voz que narra.'),
       h('li', {}, h('b', {}, 'Jamendo y FreeSound'), ': música y efectos. Son las dos únicas que se '
         + 'pueden dejar para luego; las otras tres hacen falta.')),
@@ -10907,7 +10907,7 @@ function tarjetaBienvenidaInicio() {
       'Abajo a la derecha hay una burbuja: es el asistente. Sabe cómo funciona '
       + 'todo esto y ve lo que está pasando en tu Estudio, así que cuando algo '
       + 'falle o no sepas seguir, pregúntale. Contesta con tu propia cuenta de '
-      + 'Claude, que es lo primero que vamos a dejar puesto.'),
+      + 'Antigravity CLI (Gemini), que es lo primero que vamos a dejar puesto.'),
     h('div', { clase: 'meta' },
       'Todo lo que pongas aquí se cambia después desde Configuración, el '
       + 'engranaje de arriba a la derecha.'),
@@ -10934,12 +10934,11 @@ function tarjetaClaudeInicio() {
   const estado = ASISTENTE.estado;
   const partes = [
     h('div', { clase: 'pista' },
-      'Con Claude no va una clave: va tu SESIÓN. El Estudio gasta tu '
-      + 'suscripción de Claude, nunca pago por uso, y el asistente contesta con '
-      + 'ella. Hace falta una suscripción (Pro o Max): si no la tienes, se '
-      + 'contrata en '),
+      'Con Antigravity CLI (Gemini) no va una clave: va tu SESIÓN de Google. El Estudio '
+      + 'usa tu cuenta de Antigravity CLI (Gemini), nunca pago por uso para el guion, y el '
+      + 'asistente contesta con ella. Puedes gestionar tu cuenta en '),
   ];
-  partes[0].appendChild(enlaceInicio('claude.ai', 'https://claude.ai/'));
+  partes[0].appendChild(enlaceInicio('antigravity.google', 'https://antigravity.google/'));
   partes[0].appendChild(document.createTextNode('.'));
   if (!cli) {
     partes.push(h('div', { clase: 'cargando' }, 'mirando la cuenta…'));
@@ -11000,7 +10999,7 @@ function tarjetaClaudeInicio() {
   if (!abierto) {
     // el acceso arranca solo: sin botón que pulsar antes del enlace
     if (!INICIO.arrancando) arrancarAccesoGuia(cuenta);
-    partes.push(h('div', { clase: 'cargando' }, 'pidiéndole el enlace a Claude…'));
+    partes.push(h('div', { clase: 'cargando' }, 'pidiéndole el enlace a Antigravity CLI (Gemini)…'));
     return partes;
   }
   partes.push(pasoDelAccesoGuia(cuenta, intento));
@@ -11044,7 +11043,7 @@ function pasoDelAccesoGuia(cuenta, intento) {
   const vista = estadoConfig();
   if (intento.estado === 'abriendo') {
     return h('div', { clase: 'cli-acceso' },
-      h('div', { clase: 'cargando' }, 'pidiéndole el enlace a Claude…'));
+      h('div', { clase: 'cargando' }, 'pidiéndole el enlace a Antigravity CLI (Gemini)…'));
   }
   const caja = h('textarea', {
     rows: 2, placeholder: 'pega aquí el código: se envía solo',
@@ -11083,20 +11082,18 @@ function tarjetaOpenAIInicio() {
   const puesta = !!(ficha && ficha.openai && ficha.openai.length);
   return [
     h('div', { clase: 'pista' },
-      'Con esta clave se dibujan los planos: sin ella no hay vídeo. Cada imagen '
+      'Con esta clave (GEMINI_API_KEY) Nano Banana 2.1 dibuja los planos: sin ella no hay vídeo. Cada imagen '
       + 'se paga; un vídeo de cuatro minutos son unos 4,4 $ en calidad baja.'),
     h('ol', { clase: 'inicio-pasos' },
-      h('li', {}, 'Entra en ', enlaceInicio('platform.openai.com', 'https://platform.openai.com/'),
-        ' y crea una cuenta si no la tienes.'),
-      h('li', {}, 'Carga saldo en ',
-        enlaceInicio('Billing', 'https://platform.openai.com/settings/organization/billing/overview'),
-        ' («Add to credit balance»). Sin saldo la clave existe pero no genera nada.'),
-      h('li', {}, 'Ve a ', enlaceInicio('API keys', 'https://platform.openai.com/api-keys'),
-        ' → «Create new secret key». Cópiala entera (empieza por sk-) y pégala aquí: '
-        + 'OpenAI sólo la enseña una vez.')),
+      h('li', {}, 'Entra en ', enlaceInicio('aistudio.google.com', 'https://aistudio.google.com/apikey'),
+        ' con tu cuenta de Google.'),
+      h('li', {}, 'Activa la facturación (Billing) del proyecto en Google AI Studio / Cloud Console '
+        + 'para que la clave tenga cuota de generación de imágenes.'),
+      h('li', {}, 'Pulsa en ', enlaceInicio('Create API key', 'https://aistudio.google.com/apikey'),
+        '. Cópiala entera (suele empezar por AIza…) y pégala aquí.')),
     ficha ? estadoClaveInicio(puesta, puesta ? ficha.openai[0].cola : '')
       : h('div', { clase: 'cargando' }, 'leyendo las claves…'),
-    campoClaveInicio('sk-…', clave => guardarClaves({
+    campoClaveInicio('AIza…', clave => guardarClaves({
       openai: [{ etiqueta: '', clave, activa: true }] })),
   ];
 }
@@ -11175,15 +11172,15 @@ function tarjetaFinalInicio() {
   const faltan = [!claude, !(ficha.openai && ficha.openai.length), !(ficha.cartesia && ficha.cartesia.puesta)]
     .filter(Boolean).length;
   return [
-    fila('Claude — guion, catálogo, rótulos y el asistente', claude),
-    fila('OpenAI — imágenes', !!(ficha.openai && ficha.openai.length)),
+    fila('Antigravity CLI (Gemini) — guion, catálogo, rótulos y el asistente', claude),
+    fila('Google AI (Nano Banana 2.1) — imágenes', !!(ficha.openai && ficha.openai.length)),
     fila('Cartesia — voz', !!(ficha.cartesia && ficha.cartesia.puesta)),
     fila('Jamendo — música', !!(ficha.jamendo && ficha.jamendo.puesta), true),
     fila('FreeSound — efectos', !!(ficha.freesound && ficha.freesound.puesta), true),
     faltan
       ? h('div', { clase: 'caja-aviso' },
         `Falta${faltan > 1 ? 'n' : ''} ${faltan} de las tres que hacen falta para un vídeo `
-        + '(Claude, OpenAI y Cartesia). Sin ellas no sale el vídeo entero: se '
+        + '(Antigravity CLI / Gemini, Google AI y Cartesia). Sin ellas no sale el vídeo entero: se '
         + 'ponen desde Configuración, el engranaje de arriba a la derecha.')
       : h('div', { clase: 'caja-info' },
         'Está todo. Lo siguiente es crear un estilo (cómo se dibuja y cómo se '
@@ -11337,7 +11334,7 @@ async function enviarAlAsistente(reintento) {
   const texto = campo.value.trim();
   if (!texto) return;
   if (!ASISTENTE.estado || !ASISTENTE.estado.listo) {
-    toast('el asistente necesita una sesión de Claude para contestar', true);
+    toast('el asistente necesita una sesión de Antigravity CLI (Gemini) para contestar', true);
     return;
   }
   if (ASISTENTE.charla && ASISTENTE.charla.ocupada) {
@@ -11427,7 +11424,7 @@ function pintarAsistente() {
   burbuja.classList.toggle('aviso', ASISTENTE.sinLeer && !ocupada);
   burbuja.title = listo
     ? 'Asistente: pregunta lo que sea del Estudio'
-    : 'Asistente: necesita que entres con tu cuenta de Claude';
+    : 'Asistente: necesita que entres con tu cuenta de Antigravity CLI (Gemini)';
   if (cajon.classList.contains('plegado')) return;
 
   const pastilla = vaciar($('#asistente-estado'));
@@ -11453,7 +11450,7 @@ function pintarAsistente() {
   campo.disabled = !listo || ocupada;
   campo.placeholder = listo
     ? 'Pregunta lo que quieras: un error, un paso parado, dónde está algo…'
-    : 'Entra con tu cuenta de Claude para poder preguntar';
+    : 'Entra con tu cuenta de Antigravity CLI (Gemini) para poder preguntar';
   $('#btn-enviar-asistente').disabled = !listo || ocupada;
   $('#btn-cancelar-asistente').hidden = !ocupada;
   $('#btn-nueva-charla').disabled = ocupada || !charla;
@@ -11467,23 +11464,23 @@ function puertaDelAsistente(estado) {
   const conSesion = cuentas.filter(c => c.sesion);
   if (ASISTENTE.probando) {
     return h('div', { clase: 'asistente-puerta' },
-      h('div', { clase: 'cargando' }, 'comprobando que tu cuenta de Claude contesta…'));
+      h('div', { clase: 'cargando' }, 'comprobando que tu cuenta de Antigravity CLI (Gemini) contesta…'));
   }
   if (!conSesion.length) {
     return h('div', { clase: 'asistente-puerta' },
       h('div', { clase: 'caja-aviso' },
-        'Para poder ayudarte necesito que entres primero con tu cuenta de Claude: '
+        'Para poder ayudarte necesito que entres primero con tu cuenta de Antigravity CLI (Gemini): '
         + 'contesto con tu propia suscripción, sin ninguna clave aparte. Hasta '
         + 'entonces no te puedo responder.'),
       estado.motivo ? h('div', { clase: 'meta' }, estado.motivo) : null,
       h('div', { clase: 'fila' },
-        h('button', { clase: 'primario mini', onclick: () => abrirInicio(1) }, 'Entrar con Claude'),
+        h('button', { clase: 'primario mini', onclick: () => abrirInicio(1) }, 'Entrar con Gemini'),
         h('button', { clase: 'mini fantasma', onclick: () => refrescarEstadoAsistente() },
           'Ya he entrado: vuelve a mirar')));
   }
   return h('div', { clase: 'asistente-puerta' },
     h('div', { clase: 'caja-error' },
-      'Tu cuenta de Claude tiene sesión pero ahora mismo no puede contestar.'),
+      'Tu cuenta de Antigravity CLI (Gemini) tiene sesión pero ahora mismo no puede contestar.'),
     conSesion.map(c => h('div', { clase: 'fila' },
       h('b', {}, c.etiqueta || c.correo || 'la cuenta'),
       pastillaSalud(c.salud),
