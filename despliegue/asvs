@@ -45,7 +45,7 @@ estado() {
   systemctl is-active --quiet as-video-login  && si "el acceso esta en marcha"  || no "el acceso esta PARADO"
   systemctl is-active --quiet nginx           && si "el servidor web esta en marcha" || no "el servidor web esta PARADO"
 
-  curl -fsS --max-time 5 "http://127.0.0.1:${puerto:-8110}/api/salud" >/dev/null 2>&1 \
+  curl -fsS --max-time 5 --retry 5 --retry-delay 1 --retry-connrefused "http://127.0.0.1:${puerto:-8110}/api/salud" >/dev/null 2>&1 \
     && si "el estudio contesta" || no "el estudio no contesta por dentro"
 
   codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -k "$esquema://$dominio/login" 2>/dev/null || true)"
