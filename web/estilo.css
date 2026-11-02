@@ -1284,6 +1284,41 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 }
 .fila-clave.nueva { border-top: 1px solid var(--linea-suave); padding-top: 10px; }
 
+.cli-ajustes-globales {
+  background: var(--fondo);
+  border: 1px solid var(--linea-suave);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0 14px;
+}
+.fila-ajuste-cli {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.fila-ajuste-cli label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--texto);
+  flex: 1;
+}
+.fila-ajuste-cli select {
+  flex: 1;
+  max-width: 220px;
+}
+@media (max-width: 620px) {
+  .fila-ajuste-cli {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .fila-ajuste-cli select {
+    max-width: 100%;
+  }
+}
+
 @media (max-width: 620px) {
   .fila-clave { flex-direction: column; align-items: stretch; }
   .fila-clave input, .fila-clave button { width: 100%; }

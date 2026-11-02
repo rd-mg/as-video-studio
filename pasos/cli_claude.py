@@ -103,6 +103,16 @@ def modelo_configurado():
     val = os.environ.get("ESTUDIO_CLI_MODELO", "").strip()
     if val:
         return normalizar_modelo(val, estricto=False, defecto=MODELO_POR_DEFECTO)
+    try:
+        try:
+            from . import ajustes
+        except ImportError:
+            import ajustes
+        aj = ajustes.leer()
+        if aj.get("cli_modelo"):
+            return normalizar_modelo(aj["cli_modelo"], estricto=False, defecto=MODELO_POR_DEFECTO)
+    except Exception:
+        pass
     sec = os.environ.get("ESTUDIO_SECRETOS")
     carpetas_a_mirar = []
     if sec:
@@ -125,9 +135,32 @@ def modelo_configurado():
     return None
 
 
+def esfuerzo_configurado():
+    """Devuelve el esfuerzo fijado por entorno o ajustes.json si existe."""
+    val = os.environ.get("ESTUDIO_CLI_ESFUERZO", "").strip()
+    if val:
+        return normalizar_esfuerzo(val, estricto=False, defecto=ESFUERZO_POR_DEFECTO)
+    try:
+        try:
+            from . import ajustes
+        except ImportError:
+            import ajustes
+        aj = ajustes.leer()
+        if aj.get("cli_esfuerzo"):
+            return normalizar_esfuerzo(aj["cli_esfuerzo"], estricto=False, defecto=ESFUERZO_POR_DEFECTO)
+    except Exception:
+        pass
+    return None
+
+
 def modelo_por_defecto():
     """Modelo a usar cuando nadie elige: el configurado por entorno o MODELO_POR_DEFECTO."""
     return modelo_configurado() or MODELO_POR_DEFECTO
+
+
+def esfuerzo_por_defecto():
+    """Esfuerzo a usar cuando nadie elige: el configurado por entorno o ESFUERZO_POR_DEFECTO."""
+    return esfuerzo_configurado() or ESFUERZO_POR_DEFECTO
 
 
 def reset_bloqueo_argon():
@@ -422,25 +455,27 @@ def _orden_esfuerzo(nombre):
 def por_defecto_de(fase):
     """Lo que corre en esa fase si nadie elige.
 
-    Si se ha configurado un modelo explicito (por ejemplo ESTUDIO_CLI_MODELO=gemini-3.8-flash
-    por agotamiento de saldo en Argon), ese modelo manda sobre todas las fases. Si no,
+    Si se ha configurado un modelo explicito (por ejemplo ESTUDIO_CLI_MODELO o desde la web
+    en ajustes.json), ese modelo manda sobre todas las fases. Si no,
     se usa el modelo por defecto del canal con suelo de modelo/esfuerzo por fase.
     """
     ficha = POR_FASE.get(str(fase))
     conf = modelo_configurado()
+    esf_conf = esfuerzo_configurado()
     if conf:
         modelo = conf
-        esfuerzo = ESFUERZO_POR_DEFECTO
-        if ficha:
+        esfuerzo = esf_conf or ESFUERZO_POR_DEFECTO
+        if ficha and not esf_conf:
             esfuerzo = max(esfuerzo, ficha.get("esfuerzo", "low"), key=_orden_esfuerzo)
-        porque = f"el canal tiene fijado {modelo} por ESTUDIO_CLI_MODELO"
+        porque = f"el canal tiene fijado {modelo} por configuracion"
     else:
-        modelo, esfuerzo = MODELO_POR_DEFECTO, ESFUERZO_POR_DEFECTO
+        modelo, esfuerzo = MODELO_POR_DEFECTO, esf_conf or ESFUERZO_POR_DEFECTO
         porque = f"el canal corre todo en {modelo} con esfuerzo {esfuerzo}"
         if ficha:
             modelo_ficha = normalizar_modelo(ficha["modelo"], estricto=False)
             modelo = max(modelo, modelo_ficha, key=_orden_modelo)
-            esfuerzo = max(esfuerzo, ficha["esfuerzo"], key=_orden_esfuerzo)
+            if not esf_conf:
+                esfuerzo = max(esfuerzo, ficha["esfuerzo"], key=_orden_esfuerzo)
             if (modelo, esfuerzo) != (modelo_ficha, ficha["esfuerzo"]):
                 porque += (f"; para esta fase bastaria con {modelo_ficha}/"
                            f"{ficha['esfuerzo']} ({ficha['porque']})")
@@ -475,7 +510,7 @@ def catalogo():
              "nota": "todo lo que sabe dar. Puede tardar mas de diez minutos"},
         ],
         "por_defecto": {"modelo": modelo_por_defecto(),
-                        "esfuerzo": ESFUERZO_POR_DEFECTO},
+                        "esfuerzo": esfuerzo_por_defecto()},
         "factores": {"modelo": dict(FACTOR_MODELO),
                      "esfuerzo": dict(FACTOR_ESFUERZO)},
         "aviso_factores": ("los factores son ordenes de magnitud para estimar "

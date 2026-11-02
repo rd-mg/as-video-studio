@@ -585,6 +585,21 @@ def prueba_fallback_y_seleccion():
     igual(cli_claude.modelo_por_defecto(), "gemini-4-argon",
           "vuelve a ser gemini-4-argon")
 
+    # 1.b) Persistencia y lectura via ajustes.json
+    try:
+        from . import ajustes
+    except ImportError:
+        import ajustes
+    ajustes.guardar({"cli_modelo": "gemini-3.8-flash", "cli_esfuerzo": "medium"})
+    try:
+        igual(ajustes.leer()["cli_modelo"], "gemini-3.8-flash", "guarda cli_modelo en ajustes")
+        igual(ajustes.leer()["cli_esfuerzo"], "medium", "guarda cli_esfuerzo en ajustes")
+        igual(cli_claude.modelo_configurado(), "gemini-3.8-flash", "cli_claude lo reconoce")
+        igual(cli_claude.esfuerzo_configurado(), "medium", "y el esfuerzo tambien")
+    finally:
+        ajustes.guardar({"cli_modelo": None, "cli_esfuerzo": None})
+    comprobar(cli_claude.modelo_configurado() is None, "vuelve a None al limpiar")
+
     # 2) Fallback automatico en caliente cuando argon se queda sin saldo/cupo
     cli_claude.reset_bloqueo_argon()
     modelos_lanzados = []

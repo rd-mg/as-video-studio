@@ -67,7 +67,17 @@ POR_DEFECTO = {
     # porque es de la instalacion, no de la pantalla: desde el movil no hay
     # que volver a verla.
     "onboarding_visto": False,
+    "cli_modelo": None,
+    "cli_esfuerzo": None,
 }
+
+
+def _modulo_cli():
+    try:
+        from . import cli_claude
+    except ImportError:
+        import cli_claude
+    return cli_claude
 
 
 def leer():
@@ -80,6 +90,11 @@ def leer():
     if salida.get("calidad_imagen") not in CALIDADES:
         salida["calidad_imagen"] = POR_DEFECTO["calidad_imagen"]
     salida["onboarding_visto"] = bool(salida.get("onboarding_visto"))
+    cli = _modulo_cli()
+    if salida.get("cli_modelo"):
+        salida["cli_modelo"] = cli.normalizar_modelo(salida["cli_modelo"], estricto=False)
+    if salida.get("cli_esfuerzo"):
+        salida["cli_esfuerzo"] = cli.normalizar_esfuerzo(salida["cli_esfuerzo"], estricto=False)
     return salida
 
 
@@ -92,6 +107,7 @@ def guardar(cambios):
     if not isinstance(cambios, dict):
         raise ValueError("los ajustes se cambian con un objeto")
     actual = leer()
+    cli = _modulo_cli()
     for clave, valor in cambios.items():
         if clave not in POR_DEFECTO:
             raise ValueError(f"ajuste desconocido: {clave!r}")
@@ -100,6 +116,10 @@ def guardar(cambios):
                 f"calidad {valor!r}: solo {', '.join(CALIDADES)}")
         if clave == "onboarding_visto" and not isinstance(valor, bool):
             raise ValueError("onboarding_visto es verdadero o falso")
+        if clave == "cli_modelo":
+            valor = cli.normalizar_modelo(valor, estricto=True) if valor else None
+        if clave == "cli_esfuerzo":
+            valor = cli.normalizar_esfuerzo(valor, estricto=True) if valor else None
         actual[clave] = valor
     escribir_json(RUTA, actual)
     return actual

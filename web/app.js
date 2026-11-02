@@ -2532,6 +2532,78 @@ function seccionCLI() {
       + 'puede dejar en blanco: es lo que sale en el aviso cuando una se queda '
       + 'sin cupo y entra la siguiente.'));
 
+  const ajustesGlobales = (vista.ajustes && vista.ajustes.ajustes) || {};
+  const cat = APP.cli || {};
+  const modeloActual = ajustesGlobales.cli_modelo
+    || (cat.por_defecto && cat.por_defecto.modelo)
+    || 'gemini-4-argon';
+  const esfuerzoActual = ajustesGlobales.cli_esfuerzo
+    || (cat.por_defecto && cat.por_defecto.esfuerzo)
+    || 'xhigh';
+
+  const selectModelo = h('select', {
+    onchange: async (e) => {
+      const val = e.target.value;
+      try {
+        const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { cli_modelo: val } });
+        vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, costes: r.costes };
+        toast(`modelo del CLI actualizado a ${val}`);
+        await cargarAjustesCLI();
+      } catch (err) {
+        toast(`no se pudo cambiar el modelo: ${err.message}`, true);
+      }
+      repintarClaves();
+    },
+  });
+  const listaModelos = (cat.modelos && cat.modelos.length) ? cat.modelos : [
+    { id: 'gemini-4-argon', nombre: 'Gemini 4 Argon' },
+    { id: 'gemini-3.8-flash', nombre: 'Gemini 3.8 Flash' },
+  ];
+  listaModelos.forEach(m => {
+    const opt = h('option', { value: m.id }, m.nombre || m.id);
+    if (m.id === modeloActual) opt.selected = true;
+    selectModelo.appendChild(opt);
+  });
+
+  const selectEsfuerzo = h('select', {
+    onchange: async (e) => {
+      const val = e.target.value;
+      try {
+        const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { cli_esfuerzo: val } });
+        vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, costes: r.costes };
+        toast(`esfuerzo de razonamiento actualizado a ${val}`);
+        await cargarAjustesCLI();
+      } catch (err) {
+        toast(`no se pudo cambiar el esfuerzo: ${err.message}`, true);
+      }
+      repintarClaves();
+    },
+  });
+  const listaEsfuerzos = (cat.esfuerzos && cat.esfuerzos.length) ? cat.esfuerzos : [
+    { id: 'low', nombre: 'Bajo' },
+    { id: 'medium', nombre: 'Medio' },
+    { id: 'high', nombre: 'Alto' },
+    { id: 'xhigh', nombre: 'Muy alto' },
+    { id: 'max', nombre: 'Máximo' },
+  ];
+  listaEsfuerzos.forEach(esf => {
+    const opt = h('option', { value: esf.id }, esf.nombre || esf.id);
+    if (esf.id === esfuerzoActual) opt.selected = true;
+    selectEsfuerzo.appendChild(opt);
+  });
+
+  const bloqueAjustes = h('div', { clase: 'cli-ajustes-globales' },
+    h('div', { clase: 'fila-ajuste-cli' },
+      h('label', {}, 'Modelo predeterminado:'),
+      selectModelo),
+    h('div', { clase: 'fila-ajuste-cli' },
+      h('label', {}, 'Nivel de esfuerzo:'),
+      selectEsfuerzo),
+    h('div', { clase: 'pista' },
+      'Rige para todo el Estudio. Si Argon agota su saldo o cupo, '
+      + 'el generador hace fallback automático a Flash sin interrumpir el proceso.'));
+  caja.appendChild(bloqueAjustes);
+
   if (!cli) {
     caja.appendChild(h('div', { clase: 'cargando' }, 'mirando las cuentas…'));
     return caja;
