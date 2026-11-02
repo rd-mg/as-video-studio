@@ -69,6 +69,7 @@ POR_DEFECTO = {
     "onboarding_visto": False,
     "cli_modelo": None,
     "cli_esfuerzo": None,
+    "modelo_imagen": "gemini-nano-banana-2.1",
 }
 
 
@@ -95,6 +96,16 @@ def leer():
         salida["cli_modelo"] = cli.normalizar_modelo(salida["cli_modelo"], estricto=False)
     if salida.get("cli_esfuerzo"):
         salida["cli_esfuerzo"] = cli.normalizar_esfuerzo(salida["cli_esfuerzo"], estricto=False)
+    permitidos_imagen = (
+        "gemini-nano-banana-2.1",
+        "imagen-3.0-generate-002",
+        "gemini-2.5-flash-image",
+        "gemini-3.1-flash-image-preview",
+        "agy-image-generator",
+        "agy",
+    )
+    if salida.get("modelo_imagen") not in permitidos_imagen:
+        salida["modelo_imagen"] = POR_DEFECTO["modelo_imagen"]
     return salida
 
 
@@ -120,6 +131,18 @@ def guardar(cambios):
             valor = cli.normalizar_modelo(valor, estricto=True) if valor else None
         if clave == "cli_esfuerzo":
             valor = cli.normalizar_esfuerzo(valor, estricto=True) if valor else None
+        if clave == "modelo_imagen":
+            permitidos = (
+                "gemini-nano-banana-2.1",
+                "imagen-3.0-generate-002",
+                "gemini-2.5-flash-image",
+                "gemini-3.1-flash-image-preview",
+                "agy-image-generator",
+                "agy",
+            )
+            if valor and valor not in permitidos:
+                raise ValueError(f"modelo de imagen desconocido: {valor!r}")
+            valor = valor or "gemini-nano-banana-2.1"
         actual[clave] = valor
     escribir_json(RUTA, actual)
     return actual

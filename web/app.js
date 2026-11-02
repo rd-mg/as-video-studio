@@ -2351,6 +2351,21 @@ async function guardarCalidadImagen(calidad) {
 }
 
 
+async function guardarModeloImagen(modelo) {
+  const vista = estadoConfig();
+  try {
+    const r = await pedir(API.ajustes(),
+                          { method: 'PUT', cuerpo: { modelo_imagen: modelo } });
+    vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, costes: r.costes };
+    toast(`modelo de imagen actualizado a ${modelo}`);
+  } catch (e) {
+    vista.error = e.message;
+    toast(`no se pudo cambiar el modelo de imagen: ${e.message}`, true);
+  }
+  repintarClaves();
+}
+
+
 /* LA CALIDAD DE LAS IMAGENES, con lo que cuesta DE VERDAD.
  *
  * Aqui no se ensena el precio de OpenAI: se ensena la factura. La tabla de
@@ -2412,6 +2427,33 @@ function seccionCalidadImagen() {
   caja.appendChild(h('div', { clase: 'meta' },
     'Es el punto de partida de los videos NUEVOS. Los que ya existen se quedan '
     + 'con la suya: se cambia por vídeo desde su propia ficha.'));
+
+  const modeloActual = (datos.ajustes && datos.ajustes.modelo_imagen) || 'gemini-nano-banana-2.1';
+  const selectModeloImg = h('select', {
+    onchange: (e) => guardarModeloImagen(e.target.value),
+  });
+  const listaModelosImg = [
+    { id: 'gemini-nano-banana-2.1', nombre: 'Gemini Nano Banana 2.1 (Google AI — por defecto, con referencias)' },
+    { id: 'imagen-3.0-generate-002', nombre: 'Google Imagen 3 (imagen-3.0-generate-002 — fotorrealista)' },
+    { id: 'gemini-2.5-flash-image', nombre: 'Gemini 2.5 Flash Image (Google AI — rápido)' },
+    { id: 'gemini-3.1-flash-image-preview', nombre: 'Gemini 3.1 Flash Image Preview (Google AI)' },
+    { id: 'agy-image-generator', nombre: 'Antigravity CLI (image-generator — suscripción CLI sin saldo de API)' },
+  ];
+  listaModelosImg.forEach(m => {
+    const opt = h('option', { value: m.id }, m.nombre);
+    if (m.id === modeloActual) opt.selected = true;
+    selectModeloImg.appendChild(opt);
+  });
+
+  const bloqueModelo = h('div', { clase: 'cli-ajustes-globales', style: 'margin-top: 14px;' },
+    h('div', { clase: 'fila-ajuste-cli' },
+      h('label', {}, 'Modelo de generación de imagen:'),
+      selectModeloImg),
+    h('div', { clase: 'pista', style: 'margin-top: 6px; font-size: 11px;' },
+      'Si se agotan los créditos o la cuota en Google AI, puede seleccionar "Antigravity CLI" '
+      + 'para generar imágenes usando directamente el subagente sin saldo de API.'));
+  caja.appendChild(bloqueModelo);
+
   return caja;
 }
 

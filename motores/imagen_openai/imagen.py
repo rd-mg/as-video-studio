@@ -772,22 +772,25 @@ def _ajustar_tamano_png(png_bytes, tamano):
 
 
 def _extraer_respuesta_imagen(payload, tamano):
-    """Extrae (png_bytes, usage_dict) del JSON de Gemini Nano Banana 2.1 (o legado)."""
+    """Extrae (png_bytes, usage_dict) del JSON de Gemini o Imagen 3."""
     b64_img = None
-    for cand in payload.get("candidates") or ():
-        contenido = (cand or {}).get("content") or {}
-        for parte in contenido.get("parts") or ():
-            inline = (parte or {}).get("inlineData") or (parte or {}).get("inline_data")
-            if isinstance(inline, dict) and inline.get("data"):
-                b64_img = inline["data"]
+    if isinstance(payload.get("predictions"), list) and payload["predictions"]:
+        b64_img = (payload["predictions"][0] or {}).get("bytesBase64Encoded")
+    if not b64_img:
+        for cand in payload.get("candidates") or ():
+            contenido = (cand or {}).get("content") or {}
+            for parte in contenido.get("parts") or ():
+                inline = (parte or {}).get("inlineData") or (parte or {}).get("inline_data")
+                if isinstance(inline, dict) and inline.get("data"):
+                    b64_img = inline["data"]
+                    break
+            if b64_img:
                 break
-        if b64_img:
-            break
     if not b64_img and isinstance(payload.get("data"), list) and payload["data"]:
         b64_img = (payload["data"][0] or {}).get("b64_json")
     if not b64_img:
         raise RuntimeError(
-            f"Nano Banana 2.1 no devolvio imagen en candidates: {str(payload)[:300]}"
+            f"El modelo no devolvio imagen en la respuesta: {str(payload)[:300]}"
         )
     png = _ajustar_tamano_png(base64.b64decode(b64_img), tamano)
 
@@ -812,6 +815,37 @@ def _extraer_respuesta_imagen(payload, tamano):
             "input_tokens_details": detalles,
         }
     return png, usage
+
+
+def modelo_configurado():
+    """Devuelve el modelo de imagen activo (por entorno, ajustes guardados o defecto)."""
+    env = os.environ.get("ESTUDIO_IMAGEN_MODELO")
+    if env:
+        return env.strip()
+    try:
+        from pasos import ajustes
+        return ajustes.leer().get("modelo_imagen") or MODELO
+    except Exception:
+        return MODELO
+
+
+def _generar_imagen_predict(prompt, cuenta, *, tamano="apaisado", quality="low", modelo="imagen-3.0-generate-002"):
+    """Genera una imagen con la API :predict de Google AI Imagen 3."""
+    aspecto = ASPECTOS.get(tamano, "16:9")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:predict"
+    cabeceras = {
+        "x-goog-api-key": cuenta.clave,
+        "Content-Type": "application/json",
+    }
+    datos = {
+        "instances": [{"prompt": prompt}],
+        "parameters": {
+            "sampleCount": 1,
+            "aspectRatio": aspecto,
+            "outputOptions": {"mimeType": "image/png"},
+        },
+    }
+    return requests.post(url, headers=cabeceras, json=datos, timeout=300)
 
 
 def _generar_con_agy(prompt, referencias, *, quality="low", tamano="apaisado"):
@@ -896,6 +930,13 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
         raise ValueError("estas imagenes de referencia no existen: "
                          + ", ".join(str(f) for f in faltan[:5]))
 
+    modelo_activo = modelo_configurado()
+    if modelo_activo in ("agy-image-generator", "agy"):
+        if shutil.which("agy"):
+            return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
+        print("[imagen] 'agy' no encontrado en el sistema; usando motor Google AI...", flush=True)
+        modelo_activo = MODELO
+
     cuenta_fija = _Cuenta("clave explicita", api_key) if api_key else None
     ultimo_error = None
     reintento_imagen = False
@@ -917,64 +958,78 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             "Content-Type": "application/json",
         }
         t0 = time.time()
-        partes = []
-        for ruta in referencias[:14]:
-            with open(ruta, "rb") as fh:
-                b64_ref = base64.b64encode(fh.read()).decode("ascii")
-            partes.append({
-                "inline_data": {
-                    "mime_type": "image/png",
-                    "data": b64_ref,
-                }
-            })
-        partes.append({"text": prompt})
-        datos = {
-            "model": _MODELO_RESUELTO[0] or MODELO,
-            "contents": [{"parts": partes}],
-            "generationConfig": {
-                "responseModalities": ["IMAGE"],
-                "imageConfig": {
-                    "aspectRatio": ASPECTOS.get(tamano, "16:9"),
-                    "imageSize": RESOLUCIONES.get(quality, "1K"),
-                },
-            },
-        }
-        url_base = API_URL if referencias else API_URL_SIN_REFS
-        if _MODELO_RESUELTO[0] and url_base == API_URL:
-            url_efectiva = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{_MODELO_RESUELTO[0]}:generateContent"
+
+        if modelo_activo == "imagen-3.0-generate-002":
+            r = _generar_imagen_predict(
+                prompt, cuenta, tamano=tamano, quality=quality, modelo=modelo_activo
             )
         else:
-            url_efectiva = url_base
-        r = requests.post(url_efectiva, headers=cabeceras, json=datos, timeout=600)
-        if r.status_code == 404 and url_base == API_URL:
-            for candidato in MODELOS_GOOGLE_AI:
-                if candidato == (_MODELO_RESUELTO[0] or MODELO):
-                    continue
-                url_cand = (
-                    f"https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{candidato}:generateContent"
-                )
-                r = requests.post(url_cand, headers=cabeceras, json=datos, timeout=600)
-                if r.status_code == 400 and "imagesize" in r.text.lower():
-                    datos_sin_size = {
-                        "model": candidato,
-                        "contents": [{"parts": partes}],
-                        "generationConfig": {
-                            "responseModalities": ["IMAGE"],
-                            "imageConfig": {
-                                "aspectRatio": ASPECTOS.get(tamano, "16:9"),
-                            },
-                        },
+            partes = []
+            for ruta in referencias[:14]:
+                with open(ruta, "rb") as fh:
+                    b64_ref = base64.b64encode(fh.read()).decode("ascii")
+                partes.append({
+                    "inline_data": {
+                        "mime_type": "image/png",
+                        "data": b64_ref,
                     }
-                    r = requests.post(
-                        url_cand, headers=cabeceras, json=datos_sin_size, timeout=600
+                })
+            partes.append({"text": prompt})
+            modelo_actual = (
+                modelo_activo if modelo_activo in MODELOS_GOOGLE_AI else (_MODELO_RESUELTO[0] or MODELO)
+            )
+            datos = {
+                "model": modelo_actual,
+                "contents": [{"parts": partes}],
+                "generationConfig": {
+                    "responseModalities": ["IMAGE"],
+                    "imageConfig": {
+                        "aspectRatio": ASPECTOS.get(tamano, "16:9"),
+                        "imageSize": RESOLUCIONES.get(quality, "1K"),
+                    },
+                },
+            }
+            url_base = API_URL if referencias else API_URL_SIN_REFS
+            if modelo_actual and modelo_actual != MODELO:
+                url_efectiva = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{modelo_actual}:generateContent"
+                )
+            elif _MODELO_RESUELTO[0] and url_base == API_URL:
+                url_efectiva = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{_MODELO_RESUELTO[0]}:generateContent"
+                )
+            else:
+                url_efectiva = url_base
+            r = requests.post(url_efectiva, headers=cabeceras, json=datos, timeout=600)
+            if r.status_code == 404 and url_base == API_URL:
+                for candidato in MODELOS_GOOGLE_AI:
+                    if candidato == modelo_actual:
+                        continue
+                    url_cand = (
+                        f"https://generativelanguage.googleapis.com/v1beta/models/"
+                        f"{candidato}:generateContent"
                     )
-                if r.status_code != 404:
-                    if r.status_code == 200:
-                        _MODELO_RESUELTO[0] = candidato
-                    break
+                    r = requests.post(url_cand, headers=cabeceras, json=datos, timeout=600)
+                    if r.status_code == 400 and "imagesize" in r.text.lower():
+                        datos_sin_size = {
+                            "model": candidato,
+                            "contents": [{"parts": partes}],
+                            "generationConfig": {
+                                "responseModalities": ["IMAGE"],
+                                "imageConfig": {
+                                    "aspectRatio": ASPECTOS.get(tamano, "16:9"),
+                                },
+                            },
+                        }
+                        r = requests.post(
+                            url_cand, headers=cabeceras, json=datos_sin_size, timeout=600
+                        )
+                    if r.status_code != 404:
+                        if r.status_code == 200:
+                            _MODELO_RESUELTO[0] = candidato
+                        break
         segundos = time.time() - t0
 
         # se aprende de TODAS las respuestas, no solo de los errores: el sitio
@@ -991,9 +1046,13 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             _gasto["llamadas"] += 1
             if cuenta_fija is None:
                 _quizas_subir(cuenta)
+            modelo_usado = (
+                modelo_activo if modelo_activo != MODELO
+                else (_MODELO_RESUELTO[0] or MODELO)
+            )
             return png, {"segundos": round(segundos, 1), "quality": quality,
                          "refs": len(referencias), "coste": PRECIO[quality],
-                         "modelo": MODELO, "tamano": TAMANOS[tamano],
+                         "modelo": modelo_usado, "tamano": TAMANOS[tamano],
                          "usage": usage}
 
         ultimo_error = f"HTTP {r.status_code}: {r.text[:200]}"

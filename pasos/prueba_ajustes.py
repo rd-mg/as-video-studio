@@ -600,6 +600,33 @@ def prueba_fallback_y_seleccion():
         ajustes.guardar({"cli_modelo": None, "cli_esfuerzo": None})
     comprobar(cli_claude.modelo_configurado() is None, "vuelve a None al limpiar")
 
+    # 1.c) Modelo de generacion de imagen
+    try:
+        from motores.imagen_openai import imagen as motor_img
+    except ImportError:
+        raiz_estudio = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.join(raiz_estudio, "motores", "imagen_openai"))
+        import imagen as motor_img
+    ajustes.guardar({"modelo_imagen": "imagen-3.0-generate-002"})
+    try:
+        igual(ajustes.leer()["modelo_imagen"], "imagen-3.0-generate-002",
+              "guarda modelo_imagen en ajustes")
+        igual(motor_img.modelo_configurado(), "imagen-3.0-generate-002",
+              "motor de imagen reconoce el modelo guardado")
+        ajustes.guardar({"modelo_imagen": "agy-image-generator"})
+        igual(motor_img.modelo_configurado(), "agy-image-generator",
+              "acepta agy-image-generator")
+        rechazado = False
+        try:
+            ajustes.guardar({"modelo_imagen": "modelo_inventado"})
+        except ValueError:
+            rechazado = True
+        comprobar(rechazado, "rechaza un modelo de imagen no permitido")
+    finally:
+        ajustes.guardar({"modelo_imagen": "gemini-nano-banana-2.1"})
+    igual(motor_img.modelo_configurado(), "gemini-nano-banana-2.1",
+          "vuelve al modelo de imagen por defecto")
+
     # 2) Fallback automatico en caliente cuando argon se queda sin saldo/cupo
     cli_claude.reset_bloqueo_argon()
     modelos_lanzados = []

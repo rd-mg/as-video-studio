@@ -133,7 +133,11 @@ def prueba_motor_sin_adjuntos():
         ref = _png(os.path.join(CARPETA, "motor", "ref.png"), (200, 10, 10))
         imagen.generar("un gato", [ref], quality="low")
         igual(llamadas[-1]["url"], imagen.API_URL, "con referencias sigue yendo a /edits")
-        comprobar(llamadas[-1].get("files"), "y las manda como adjuntos")
+        tiene_adjuntos = bool(llamadas[-1].get("files")) or any(
+            "inline_data" in p
+            for p in llamadas[-1].get("json", {}).get("contents", [{}])[0].get("parts", [])
+        )
+        comprobar(tiene_adjuntos, "y las manda como adjuntos")
 
     # el cubo: va justa, nadie la frena -> sube; un 429 sin numero -> atras
     cuenta = imagen._cuentas()[0]
