@@ -140,11 +140,17 @@ def prueba_orden():
     igual(orden[orden.index("--effort") + 1], "high", "y el esfuerzo elegido")
 
     orden_agy, entrada_agy = cli_claude._adaptar_orden_agy(
-        ["/usr/bin/agy"] + orden[1:] + ["--resume", "conv-1", "--permission-mode", "acceptEdits"],
+        ["/usr/bin/agy", "-p", "--model", "gemini-4-argon", "--effort", "xhigh",
+         "--strict-mcp-config", "--no-session-persistence",
+         "--resume", "conv-1", "--permission-mode", "acceptEdits",
+         "--append-system-prompt", "una linea"],
         "encargo",
     )
-    comprobar("-p" not in orden_agy and "--disable-slash-commands" in orden_agy,
-              "para agy adapta flags y lee stdin sin -p")
+    comprobar("-p" not in orden_agy and "--no-session-persistence" not in orden_agy
+              and "--disable-slash-commands" in orden_agy,
+              "para agy adapta flags, omite --no-session-persistence y lee stdin sin -p")
+    igual(orden_agy[orden_agy.index("--effort") + 1], "high",
+          "para agy rebaja xhigh/max a high (tope nativo de gemini-4-argon y gemini-3.8-flash)")
     comprobar("--conversation" in orden_agy and "--mode" in orden_agy,
               "traduce --resume a --conversation y --permission-mode a --mode")
     comprobar("<system>" in entrada_agy and "una linea" in entrada_agy,

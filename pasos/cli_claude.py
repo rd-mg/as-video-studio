@@ -654,7 +654,19 @@ def _adaptar_orden_agy(orden, instruccion):
     i = 1
     while i < len(orden):
         arg = orden[i]
-        if arg == "-p":
+        if arg in ("-p", "--no-session-persistence"):
+            i += 1
+            continue
+        if arg == "--effort" and i + 1 < len(orden):
+            esf_raw = str(orden[i + 1]).strip().lower()
+            esf_agy = "high" if esf_raw in ("xhigh", "max") else esf_raw
+            nueva += ["--effort", esf_agy]
+            i += 2
+            continue
+        if arg.startswith("--effort="):
+            esf_raw = arg.split("=", 1)[1].strip().lower()
+            esf_agy = "high" if esf_raw in ("xhigh", "max") else esf_raw
+            nueva += ["--effort", esf_agy]
             i += 1
             continue
         if arg == "--strict-mcp-config":
