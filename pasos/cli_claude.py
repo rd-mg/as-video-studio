@@ -94,6 +94,78 @@ ESFUERZOS = ("low", "medium", "high", "xhigh", "max")
 MODELO_POR_DEFECTO = "gemini-4-argon"
 ESFUERZO_POR_DEFECTO = "xhigh"
 
+_ARGON_AGOTADO_HASTA = [0.0]
+_TIEMPO_COOLDOWN_ARGON_S = 1800.0  # 30 minutos
+
+
+def modelo_configurado():
+    """Devuelve el modelo explicitamente fijado por entorno o ficheros de configuracion."""
+    val = os.environ.get("ESTUDIO_CLI_MODELO", "").strip()
+    if val:
+        return normalizar_modelo(val, estricto=False, defecto=MODELO_POR_DEFECTO)
+    sec = os.environ.get("ESTUDIO_SECRETOS")
+    carpetas_a_mirar = []
+    if sec:
+        carpetas_a_mirar.append(sec)
+        carpetas_a_mirar.append(os.path.dirname(sec))
+    for c in carpetas_a_mirar:
+        for nom in (".env", "entorno"):
+            ruta = os.path.join(c, nom)
+            if os.path.isfile(ruta):
+                try:
+                    with open(ruta, "r", encoding="utf-8") as f:
+                        for linea in f:
+                            linea = linea.strip()
+                            if linea.startswith("ESTUDIO_CLI_MODELO="):
+                                mod = linea.split("=", 1)[1].strip().strip('"').strip("'")
+                                if mod:
+                                    return normalizar_modelo(mod, estricto=False, defecto=MODELO_POR_DEFECTO)
+                except Exception:
+                    pass
+    return None
+
+
+def modelo_por_defecto():
+    """Modelo a usar cuando nadie elige: el configurado por entorno o MODELO_POR_DEFECTO."""
+    return modelo_configurado() or MODELO_POR_DEFECTO
+
+
+def reset_bloqueo_argon():
+    """Limpia el estado de bloqueo temporal de Argon (util para pruebas y tras recargar saldo)."""
+    _ARGON_AGOTADO_HASTA[0] = 0.0
+
+
+def _es_error_cupo_o_creditos(exc):
+    if isinstance(exc, LimiteAgotado):
+        return True
+    msg = str(exc or "").lower()
+    return any(
+        k in msg
+        for k in (
+            "cupo",
+            "quota",
+            "credit",
+            "credito",
+            "crédito",
+            "saldo",
+            "limit",
+            "limite",
+            "límite",
+            "exhaust",
+            "capacity",
+            "capacidad",
+            "429",
+            "resource_exhausted",
+            "rate_limit",
+            "rate limit",
+            "overloaded",
+            "unavailable",
+            "sin saldo",
+            "sin credito",
+            "sin crédito",
+        )
+    )
+
 # Cuanto multiplica cada esfuerzo al tiempo de 'low'. NO son medidas: 'low' es lo
 # unico medido de verdad (67 s frente a los 605,8 s de no pasar el flag). Son
 # ordenes de magnitud para que el techo de tiempo y la primera estimacion sean
@@ -348,19 +420,32 @@ def _orden_esfuerzo(nombre):
 
 
 def por_defecto_de(fase):
-    """Lo que corre en esa fase si nadie elige. Hoy, lo mismo en todas."""
+    """Lo que corre en esa fase si nadie elige.
+
+    Si se ha configurado un modelo explicito (por ejemplo ESTUDIO_CLI_MODELO=gemini-3.8-flash
+    por agotamiento de saldo en Argon), ese modelo manda sobre todas las fases. Si no,
+    se usa el modelo por defecto del canal con suelo de modelo/esfuerzo por fase.
+    """
     ficha = POR_FASE.get(str(fase))
-    modelo, esfuerzo = MODELO_POR_DEFECTO, ESFUERZO_POR_DEFECTO
-    porque = f"el canal corre todo en {modelo} con esfuerzo {esfuerzo}"
-    if ficha:
-        modelo_ficha = normalizar_modelo(ficha["modelo"], estricto=False)
-        modelo = max(modelo, modelo_ficha, key=_orden_modelo)
-        esfuerzo = max(esfuerzo, ficha["esfuerzo"], key=_orden_esfuerzo)
-        if (modelo, esfuerzo) != (modelo_ficha, ficha["esfuerzo"]):
-            porque += (f"; para esta fase bastaria con {modelo_ficha}/"
-                       f"{ficha['esfuerzo']} ({ficha['porque']})")
-        else:
-            porque = ficha["porque"]
+    conf = modelo_configurado()
+    if conf:
+        modelo = conf
+        esfuerzo = ESFUERZO_POR_DEFECTO
+        if ficha:
+            esfuerzo = max(esfuerzo, ficha.get("esfuerzo", "low"), key=_orden_esfuerzo)
+        porque = f"el canal tiene fijado {modelo} por ESTUDIO_CLI_MODELO"
+    else:
+        modelo, esfuerzo = MODELO_POR_DEFECTO, ESFUERZO_POR_DEFECTO
+        porque = f"el canal corre todo en {modelo} con esfuerzo {esfuerzo}"
+        if ficha:
+            modelo_ficha = normalizar_modelo(ficha["modelo"], estricto=False)
+            modelo = max(modelo, modelo_ficha, key=_orden_modelo)
+            esfuerzo = max(esfuerzo, ficha["esfuerzo"], key=_orden_esfuerzo)
+            if (modelo, esfuerzo) != (modelo_ficha, ficha["esfuerzo"]):
+                porque += (f"; para esta fase bastaria con {modelo_ficha}/"
+                           f"{ficha['esfuerzo']} ({ficha['porque']})")
+            else:
+                porque = ficha["porque"]
     return {"modelo": modelo, "esfuerzo": esfuerzo, "porque": porque,
             "recomendado": dict(ficha) if ficha else None}
 
@@ -389,7 +474,7 @@ def catalogo():
             {"id": "max", "nombre": "Maximo",
              "nota": "todo lo que sabe dar. Puede tardar mas de diez minutos"},
         ],
-        "por_defecto": {"modelo": MODELO_POR_DEFECTO,
+        "por_defecto": {"modelo": modelo_por_defecto(),
                         "esfuerzo": ESFUERZO_POR_DEFECTO},
         "factores": {"modelo": dict(FACTOR_MODELO),
                      "esfuerzo": dict(FACTOR_ESFUERZO)},
@@ -546,22 +631,9 @@ def construir_orden(modelo=MODELO_POR_DEFECTO, esfuerzo=ESFUERZO_POR_DEFECTO,
     return orden
 
 
-def ejecutar(instruccion, modelo=MODELO_POR_DEFECTO,
-             esfuerzo=ESFUERZO_POR_DEFECTO, cwd=None, tiempo_max_s=0,
-             base_tiempo_s=420, sistema=None,
-             herramientas_vetadas=HERRAMIENTAS_VETADAS, permisos=None,
-             extra=None, avance=None, consejos_extra=None, para="la llamada",
-             herramientas_permitidas=()):
-    """Lanza el CLI en headless y devuelve (texto de la respuesta, sobre JSON).
-
-    La instruccion va SIEMPRE por stdin, nunca como argumento: un transcript de
-    20 minutos pasa de 60 KB y no cabe en una linea de comandos de Windows.
-
-    El timeout es finito y mata el arbol de procesos: nunca se deja un paso en
-    'ejecutando' para siempre.
-    """
-    modelo = normalizar_modelo(modelo)
-    esfuerzo = normalizar_esfuerzo(esfuerzo)
+def _intentar_cuentas(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
+                      sistema, herramientas_vetadas, permisos, extra, avance,
+                      consejos_extra, para, herramientas_permitidas):
     lista = cuentas()
     for indice, cuenta in enumerate(lista):
         try:
@@ -591,6 +663,53 @@ def ejecutar(instruccion, modelo=MODELO_POR_DEFECTO,
     # inalcanzable: `cuentas()` nunca devuelve una lista vacia. Escrito de todas
     # formas porque "inalcanzable" envejece mal.
     raise RuntimeError("no hay ninguna cuenta del CLI de claude configurada")
+
+
+def ejecutar(instruccion, modelo=None,
+             esfuerzo=ESFUERZO_POR_DEFECTO, cwd=None, tiempo_max_s=0,
+             base_tiempo_s=420, sistema=None,
+             herramientas_vetadas=HERRAMIENTAS_VETADAS, permisos=None,
+             extra=None, avance=None, consejos_extra=None, para="la llamada",
+             herramientas_permitidas=()):
+    """Lanza el CLI en headless y devuelve (texto de la respuesta, sobre JSON).
+
+    La instruccion va SIEMPRE por stdin, nunca como argumento: un transcript de
+    20 minutos pasa de 60 KB y no cabe en una linea de comandos de Windows.
+
+    El timeout es finito y mata el arbol de procesos: nunca se deja un paso en
+    'ejecutando' para siempre.
+    """
+    if modelo is None:
+        modelo = modelo_por_defecto()
+    modelo = normalizar_modelo(modelo)
+    esfuerzo = normalizar_esfuerzo(esfuerzo)
+
+    ahora = time.monotonic()
+    modelo_a_usar = modelo
+    # Si se pide Argon pero esta en periodo de agotamiento temporal,
+    # enrutamos directo a Flash para no perder tiempo ni fallar.
+    if modelo == "gemini-4-argon" and ahora < _ARGON_AGOTADO_HASTA[0]:
+        modelo_a_usar = "gemini-3.8-flash"
+        if avance and hasattr(avance, "anotar"):
+            avance.anotar("[cli] argon sin saldo temporalmente; usando gemini-3.8-flash")
+
+    try:
+        return _intentar_cuentas(
+            instruccion, modelo_a_usar, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
+            sistema, herramientas_vetadas, permisos, extra, avance,
+            consejos_extra, para, herramientas_permitidas)
+    except Exception as fallo:
+        if modelo_a_usar == "gemini-4-argon" and _es_error_cupo_o_creditos(fallo):
+            _ARGON_AGOTADO_HASTA[0] = time.monotonic() + _TIEMPO_COOLDOWN_ARGON_S
+            print(f"[cli] gemini-4-argon sin cupo/creditos ({fallo}); "
+                  f"haciendo fallback automatico a gemini-3.8-flash para {para}", flush=True)
+            if avance and hasattr(avance, "anotar"):
+                avance.anotar("[cli] argon sin saldo; pasando a gemini-3.8-flash...")
+            return _intentar_cuentas(
+                instruccion, "gemini-3.8-flash", esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
+                sistema, herramientas_vetadas, permisos, extra, avance,
+                consejos_extra, para, herramientas_permitidas)
+        raise
 
 
 def _anotar_salud(cuenta, fallo=None, para=""):

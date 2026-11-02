@@ -10,6 +10,7 @@
 #      asvs reiniciar    apagar y encender
 #      asvs actualizar   traer la ultima version (sin tocar tus videos)
 #      asvs clave        ver o cambiar la contrasena de acceso
+#      asvs modelo       ver o cambiar el modelo del CLI (argon / flash)
 #      asvs https        (re)intentar el certificado
 # -----------------------------------------------------------------------------
 set -euo pipefail
@@ -55,6 +56,11 @@ estado() {
   command -v ffmpeg >/dev/null && si "ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')" || no "falta ffmpeg"
   [ -x /usr/local/bin/estudio-edge ] && si "navegador: $(/usr/local/bin/estudio-edge --version 2>/dev/null | head -1)" || no "falta el navegador"
   command -v agy >/dev/null && si "CLI de Antigravity $(agy --version 2>/dev/null | head -1)" || no "falta el CLI de Antigravity (agy)"
+  local modelo_cfg
+  modelo_cfg="$(sed -n 's/^ESTUDIO_CLI_MODELO=//p' "$RAIZ/datos/entorno" 2>/dev/null | head -1)"
+  [ -n "$modelo_cfg" ] \
+    && si "modelo CLI: $modelo_cfg" \
+    || si "modelo CLI: gemini-4-argon (por defecto, fallback automatico a flash)"
 
   # La comprobacion que no es obvia: que el fichero con el que se MIDE el texto
   # sea el mismo con el que se DIBUJA. Si se separan, los rotulos se salen de su
@@ -197,13 +203,47 @@ https() {
   echo "Listo: https://$dominio"
 }
 
+modelo() {
+  local actual
+  actual="$(sed -n 's/^ESTUDIO_CLI_MODELO=//p' "$RAIZ/datos/entorno" 2>/dev/null | head -1)"
+  [ -n "$actual" ] || actual="gemini-4-argon (por defecto)"
+  if [ -z "${1:-}" ]; then
+    printf '\n%s  Modelo del CLI de Antigravity (agy)%s\n\n' "$B" "$N"
+    printf '  Modelo actual: %s%s%s\n\n' "$B" "$actual" "$N"
+    printf '  Modelos disponibles:\n'
+    printf '    · %sgemini-4-argon%s   (maxima calidad y redaccion)\n' "$B" "$N"
+    printf '    · %sgemini-3.8-flash%s (rapido, ideal si se agotan creditos de Argon)\n\n' "$B" "$N"
+    printf '  Para cambiar de modelo:\n'
+    printf '    asvs modelo gemini-3.8-flash\n'
+    printf '    asvs modelo gemini-4-argon\n\n'
+    return 0
+  fi
+  local nuevo="$1"
+  case "$nuevo" in
+    flash|gemini-flash|gemini-3.8-flash) nuevo="gemini-3.8-flash" ;;
+    argon|gemini-argon|gemini-4-argon)   nuevo="gemini-4-argon" ;;
+    *)
+      echo "Modelo no reconocido: $nuevo. Usa 'gemini-3.8-flash' o 'gemini-4-argon'."
+      return 1
+      ;;
+  esac
+  if grep -q '^ESTUDIO_CLI_MODELO=' "$RAIZ/datos/entorno" 2>/dev/null; then
+    sed -i "s|^ESTUDIO_CLI_MODELO=.*|ESTUDIO_CLI_MODELO=$nuevo|" "$RAIZ/datos/entorno"
+  else
+    echo "ESTUDIO_CLI_MODELO=$nuevo" >> "$RAIZ/datos/entorno"
+  fi
+  si "modelo fijado a $nuevo en $RAIZ/datos/entorno"
+  reiniciar
+}
+
 case "${1:-estado}" in
   estado|"")   estado ;;
   registro)    registro "${2:-60}" ;;
   reiniciar)   reiniciar ;;
   actualizar)  actualizar ;;
   clave)       shift; estudio-clave "$@" ;;
+  modelo)      shift; modelo "$@" ;;
   https)       https ;;
-  -h|--help|ayuda) sed -n '5,13p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  -h|--help|ayuda) sed -n '5,14p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

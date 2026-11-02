@@ -564,6 +564,77 @@ def prueba_retencion(carpeta):
           f"y del ajuste usado se guardan las ultimas {estadisticas.MUESTRAS_POR_AJUSTE}")
 
 
+def prueba_fallback_y_seleccion():
+    seccion("8] seleccion por entorno y fallback automatico de argon a flash")
+    # 1) Seleccion por ESTUDIO_CLI_MODELO
+    os.environ["ESTUDIO_CLI_MODELO"] = "gemini-3.8-flash"
+    try:
+        igual(cli_claude.modelo_configurado(), "gemini-3.8-flash",
+              "detecta ESTUDIO_CLI_MODELO")
+        igual(cli_claude.modelo_por_defecto(), "gemini-3.8-flash",
+              "el modelo por defecto pasa a ser flash")
+        igual(cli_claude.por_defecto_de("tono")["modelo"], "gemini-3.8-flash",
+              "y manda sobre fases que antes pedian argon")
+        igual(cli_claude.por_defecto_de("guion")["modelo"], "gemini-3.8-flash",
+              "y tambien sobre guion")
+    finally:
+        os.environ.pop("ESTUDIO_CLI_MODELO", None)
+
+    comprobar(cli_claude.modelo_configurado() is None,
+              "sin entorno vuelve al defecto general")
+    igual(cli_claude.modelo_por_defecto(), "gemini-4-argon",
+          "vuelve a ser gemini-4-argon")
+
+    # 2) Fallback automatico en caliente cuando argon se queda sin saldo/cupo
+    cli_claude.reset_bloqueo_argon()
+    modelos_lanzados = []
+
+    def mock_popen(cmd, *a, **k):
+        cmd_str = [str(x) for x in cmd]
+        m = cmd_str[cmd_str.index("--model") + 1] if "--model" in cmd_str else ""
+        modelos_lanzados.append(m)
+        if m == "gemini-4-argon":
+            return ProcesoFalso(
+                {"result": "Quota exceeded for quota metric ... gemini-4-argon",
+                 "is_error": True}, codigo=1)
+        return ProcesoFalso({"result": "exito desde flash", "model": m})
+
+    orig_popen = subprocess.Popen
+    orig_which = shutil.which
+    orig_cuentas = cli_claude.cuentas
+    shutil.which = lambda nombre: r"/usr/bin/agy"
+    cli_claude.cuentas = lambda: [{"etiqueta": "principal", "config_dir": ""}]
+    subprocess.Popen = mock_popen
+    try:
+        texto, sobre = cli_claude.ejecutar("redactar", modelo="gemini-4-argon")
+        igual(texto, "exito desde flash",
+              "fallback automatico devuelve la respuesta de flash")
+        igual(modelos_lanzados, ["gemini-4-argon", "gemini-3.8-flash"],
+              "probo primero argon y al agotarse cayo a flash")
+        igual(sobre["_ajuste"]["modelo"], "gemini-3.8-flash",
+              "el sobre estampa flash como modelo real")
+
+        # Llamada posterior dentro del periodo de enfriamiento:
+        # va directo a flash sin perder tiempo rebotando en argon
+        modelos_lanzados.clear()
+        texto2, sobre2 = cli_claude.ejecutar("otra llamada", modelo="gemini-4-argon")
+        igual(texto2, "exito desde flash", "la segunda llamada responde con flash")
+        igual(modelos_lanzados, ["gemini-3.8-flash"],
+              "enruta directo a flash en el periodo de enfriamiento")
+
+        # Limpieza del enfriamiento: vuelve a probar argon
+        cli_claude.reset_bloqueo_argon()
+        modelos_lanzados.clear()
+        texto3, sobre3 = cli_claude.ejecutar("tercera", modelo="gemini-4-argon")
+        igual(modelos_lanzados, ["gemini-4-argon", "gemini-3.8-flash"],
+              "tras reset vuelve a intentar argon antes de caer a flash")
+    finally:
+        subprocess.Popen = orig_popen
+        shutil.which = orig_which
+        cli_claude.cuentas = orig_cuentas
+        cli_claude.reset_bloqueo_argon()
+
+
 def main():
     # ESTA SUITE NO CORRIA NADA: al separar esta version de la grande se quedo
     # sin su `main`, y `pruebas.ps1` la daba por buena con la salida vacia. Son
@@ -579,6 +650,7 @@ def main():
         prueba_limite()
         prueba_cadena()
         prueba_login()
+        prueba_fallback_y_seleccion()
         prueba_historico(carpeta)
         prueba_recomendacion(carpeta)
         prueba_retencion(carpeta)
