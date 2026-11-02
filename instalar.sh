@@ -5,7 +5,7 @@
 #  Se pega UNA linea en la consola del servidor y esto deja el estudio montado,
 #  con su acceso por contrasena y su HTTPS:
 #
-#      curl -fsSL https://raw.githubusercontent.com/NeverBlink/as-video-studio/main/instalar.sh -o instalar.sh
+#      curl -fsSL https://raw.githubusercontent.com/rd-mg/as-video-studio/main/instalar.sh -o instalar.sh
 #      bash instalar.sh
 #
 #  Se puede volver a lanzar las veces que haga falta: no repite lo que ya esta
@@ -22,7 +22,7 @@ set -euo pipefail
 
 VERSION_INSTALADOR="1.0.0"
 
-REPO="${ASVS_REPO:-NeverBlink/as-video-studio}"
+REPO="${ASVS_REPO:-rd-mg/as-video-studio}"
 RAMA="${ASVS_RAMA:-main}"
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
 USUARIO="${ASVS_USUARIO:-studio}"
@@ -310,10 +310,10 @@ navegador() {
   bien "$("$binario" --version 2>/dev/null | head -1)"
 }
 
-# ---------------------------------------------------- 5. Node y el CLI de Claude
+# ---------------------------------------------------- 5. Node y el CLI de Antigravity (Gemini)
 
 node_y_claude() {
-  paso "Node y el CLI de Claude"
+  paso "Node y el CLI de Antigravity (Gemini)"
 
   local mayor=0
   command -v node >/dev/null 2>&1 && mayor="$(node -v | sed 's/^v\([0-9]*\).*/\1/')"
@@ -327,15 +327,16 @@ node_y_claude() {
   command -v node >/dev/null || fallo "Node no se ha instalado."
   bien "node $(node -v)"
 
-  # El guion, los rotulos y el asistente los escribe TU SUSCRIPCION de Claude a
-  # traves de este CLI. No es una clave de API: se entra despues, desde la
+  # El guion, los rotulos y el asistente los escribe TU CUENTA de Antigravity CLI (Gemini)
+  # a traves del comando `agy`. No es una clave de API: se entra despues, desde la
   # pantalla de Configuracion del estudio, sin volver a esta consola.
-  if ! command -v claude >/dev/null 2>&1; then
-    nota "instalando el CLI de Claude..."
-    npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 \
-      || fallo "no se ha podido instalar el CLI de Claude (npm install -g @anthropic-ai/claude-code)."
+  if ! command -v agy >/dev/null 2>&1; then
+    nota "instalando el CLI de Antigravity (agy)..."
+    curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin >/dev/null 2>&1 \
+      || fallo "no se ha podido instalar el CLI de Antigravity (agy)."
+    chmod 755 /usr/local/bin/agy
   fi
-  bien "claude $(claude --version 2>/dev/null | head -1)"
+  bien "agy $(agy --version 2>/dev/null | head -1)"
 }
 
 # ------------------------------------------------- 6. usuario y carpetas
@@ -762,8 +763,8 @@ despedida() {
   [ -n "$clave" ] && printf '   Contrasena:   %s%s%s\n' "$B" "$clave" "$N" >&3
   printf '\n'
   printf '   Lo que falta se hace YA DENTRO, sin volver a esta consola: al entrar\n'
-  printf '   sale una guia que pide, una a una, la cuenta de Claude (es un login,\n'
-  printf '   no una clave), la clave de OpenAI y la de Cartesia.\n'
+  printf '   sale una guia que pide, una a una, la cuenta de Antigravity CLI / Gemini\n'
+  printf '   (es un login, no una clave), la clave de Google AI (GEMINI_API_KEY) y la de Cartesia.\n'
   printf '\n'
   printf '   Si alguna vez se te olvida la contrasena, vuelve aqui y escribe:\n'
   printf '      %sestudio-clave%s\n' "$B" "$N"

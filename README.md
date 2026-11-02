@@ -45,10 +45,10 @@ el estilo obligaba a acordarse de cambiarlas en cada encargo.
 
 Una línea en la consola del VPS, cinco minutos, y queda montado con su dirección,
 su candado y su contraseña — incluido todo lo que hace falta alrededor (ffmpeg,
-el navegador que dibuja los planos, las fuentes, el CLI de Claude):
+el navegador que dibuja los planos, las fuentes, el CLI de Antigravity `agy`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NeverBlink/as-video-studio/main/instalar.sh -o instalar.sh && bash instalar.sh
+curl -fsSL https://raw.githubusercontent.com/rd-mg/as-video-studio/main/instalar.sh -o instalar.sh && bash instalar.sh
 ```
 
 Los tres pasos, con qué pulsar y qué hacer si algo falla, están en

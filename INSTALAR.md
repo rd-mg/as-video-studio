@@ -11,8 +11,8 @@ de servidores: se pega una línea y se espera.
 | Qué | Para qué | Cuánto cuesta |
 |---|---|---|
 | **Un VPS con Ubuntu 24.04** | la máquina donde vive el estudio | desde ~7 €/mes |
-| **Una cuenta de Claude** (Pro o Max) | escribe el guion y los rótulos | tu suscripción, sin coste extra por vídeo |
-| **Una clave de OpenAI** | dibuja las imágenes | se paga por imagen (abajo) |
+| **Una cuenta de Antigravity CLI (Gemini)** | escribe el guion, los rótulos y el asistente | tu suscripción, sin coste extra por vídeo |
+| **Una clave de Google AI (`GEMINI_API_KEY`)** | dibuja las imágenes (Nano Banana 2.1) | se paga por imagen (abajo) |
 | **Una clave de Cartesia** | pone la voz | plan gratuito para empezar |
 | Jamendo y FreeSound *(opcional)* | música y efectos | gratis |
 
@@ -54,7 +54,7 @@ contraseña root? Restablece tu contraseña»**. Tarda un minuto.
 ### 2. Pega esta línea y pulsa Intro
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NeverBlink/as-video-studio/main/instalar.sh -o instalar.sh && bash instalar.sh
+curl -fsSL https://raw.githubusercontent.com/rd-mg/as-video-studio/main/instalar.sh -o instalar.sh && bash instalar.sh
 ```
 
 Ahora espera. Irá contando lo que hace: el vídeo, las fuentes, el navegador, el
@@ -81,9 +81,9 @@ https://srv1234567.hstgr.cloud
 La primera vez que entras sale una **guía de inicio** que te pide las cosas de
 una en una y con el enlace de dónde se consigue cada una:
 
-1. **Entrar con Claude.** No es una clave: es un inicio de sesión. Te dará un
+1. **Entrar con Antigravity CLI (Gemini).** No es una clave: es un inicio de sesión. Te dará un
    enlace, lo abres, apruebas, y pegas el código que te devuelve.
-2. **La clave de OpenAI**, para las imágenes.
+2. **La clave de Google AI (`GEMINI_API_KEY`)**, para las imágenes (Nano Banana 2.1).
 3. **La clave de Cartesia**, para la voz.
 4. Jamendo y FreeSound si quieres música y efectos.
 

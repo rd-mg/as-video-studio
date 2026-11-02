@@ -28,7 +28,7 @@ ProtectSystem=full
 ProtectHome=yes
 ProtectControlGroups=yes
 ProtectKernelTunables=yes
-ReadWritePaths=/opt/as-video-studio/datos /opt/as-video-studio/app/cache
+ReadWritePaths=/opt/as-video-studio/datos /opt/as-video-studio/app/cache /opt/as-video-studio/home
 
 [Install]
 WantedBy=multi-user.target

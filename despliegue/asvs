@@ -15,7 +15,7 @@
 set -euo pipefail
 
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
-REPO="${ASVS_REPO:-NeverBlink/as-video-studio}"
+REPO="${ASVS_REPO:-rd-mg/as-video-studio}"
 RAMA="${ASVS_RAMA:-main}"
 USUARIO="${ASVS_USUARIO:-studio}"
 
@@ -54,7 +54,7 @@ estado() {
   printf '\n%s  lo que hace falta para generar%s\n' "$B" "$N"
   command -v ffmpeg >/dev/null && si "ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')" || no "falta ffmpeg"
   [ -x /usr/local/bin/estudio-edge ] && si "navegador: $(/usr/local/bin/estudio-edge --version 2>/dev/null | head -1)" || no "falta el navegador"
-  command -v claude >/dev/null && si "CLI de Claude $(claude --version 2>/dev/null | head -1)" || no "falta el CLI de Claude"
+  command -v agy >/dev/null && si "CLI de Antigravity $(agy --version 2>/dev/null | head -1)" || no "falta el CLI de Antigravity (agy)"
 
   # La comprobacion que no es obvia: que el fichero con el que se MIDE el texto
   # sea el mismo con el que se DIBUJA. Si se separan, los rotulos se salen de su
@@ -119,6 +119,12 @@ actualizar() {
   "$RAIZ/venv/bin/pip" install --quiet -r "$RAIZ/app/requirements.txt"
   install -m 755 "$RAIZ/app/despliegue/asvs" /usr/local/bin/asvs
   install -m 755 "$RAIZ/app/despliegue/estudio-clave" /usr/local/bin/estudio-clave
+
+  if ! command -v agy >/dev/null 2>&1; then
+    echo "Instalando el CLI de Antigravity (agy)..."
+    curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin >/dev/null 2>&1 \
+      && chmod 755 /usr/local/bin/agy || true
+  fi
 
   # LO QUE EL INSTALADOR PONE FUERA DE app/, puesto al dia igual: el envoltorio
   # del navegador (con el MISMO navegador que ya tenia), los dos servicios y los

@@ -32,7 +32,7 @@ la vez y el cortafuegos sólo deja entrar por el 80 y el 443.
 ├── login/          el acceso (Node) + su .env y su base de datos
 ├── datos/          TUS COSAS: proyectos, estilos, claves, gasto, ajustes
 │   ├── entorno     qué variable manda cada cosa a su sitio
-│   └── secretos/   las claves de API y las sesiones del CLI de Claude (chmod 700)
+│   └── secretos/   las claves de API y las sesiones del CLI de Antigravity (chmod 700)
 └── home/           el HOME del servicio — lo necesita el navegador
 ```
 
