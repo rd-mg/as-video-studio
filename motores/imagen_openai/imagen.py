@@ -29,10 +29,17 @@ import requests
 from PIL import Image
 
 MODELO = "gemini-nano-banana-2.1"
+MODELOS_GOOGLE_AI = (
+    MODELO,
+    "gemini-3.1-flash-image-preview",
+    "gemini-2.5-flash-image",
+    "gemini-3-pro-image-preview",
+)
 API_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent"
 )
 API_URL_SIN_REFS = API_URL
+_MODELO_RESUELTO = [None]
 
 PRECIO = {"low": 0.0336, "medium": 0.0504, "high": 0.113}
 TAMANOS = {"apaisado": "1536x1024", "cuadrado": "1024x1024", "vertical": "1024x1536"}
@@ -826,7 +833,6 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
         _pedir_ficha(len(referencias), cuenta)
         cabeceras = {
             "x-goog-api-key": cuenta.clave,
-            "Authorization": f"Bearer {cuenta.clave}",
             "Content-Type": "application/json",
         }
         t0 = time.time()
@@ -851,7 +857,41 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                 },
             },
         }
-        r = requests.post(API_URL, headers=cabeceras, json=datos, timeout=600)
+        url_base = API_URL if referencias else API_URL_SIN_REFS
+        if _MODELO_RESUELTO[0] and url_base == API_URL:
+            url_efectiva = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{_MODELO_RESUELTO[0]}:generateContent"
+            )
+        else:
+            url_efectiva = url_base
+        r = requests.post(url_efectiva, headers=cabeceras, json=datos, timeout=600)
+        if r.status_code == 404 and url_base == API_URL:
+            for candidato in MODELOS_GOOGLE_AI:
+                if candidato == (_MODELO_RESUELTO[0] or MODELO):
+                    continue
+                url_cand = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{candidato}:generateContent"
+                )
+                r = requests.post(url_cand, headers=cabeceras, json=datos, timeout=600)
+                if r.status_code == 400 and "imagesize" in r.text.lower():
+                    datos_sin_size = {
+                        "contents": [{"parts": partes}],
+                        "generationConfig": {
+                            "responseModalities": ["IMAGE"],
+                            "imageConfig": {
+                                "aspectRatio": ASPECTOS.get(tamano, "16:9"),
+                            },
+                        },
+                    }
+                    r = requests.post(
+                        url_cand, headers=cabeceras, json=datos_sin_size, timeout=600
+                    )
+                if r.status_code != 404:
+                    if r.status_code == 200:
+                        _MODELO_RESUELTO[0] = candidato
+                    break
         segundos = time.time() - t0
 
         # se aprende de TODAS las respuestas, no solo de los errores: el sitio

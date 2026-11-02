@@ -102,8 +102,8 @@ def probar_openai(clave):
         return _ficha("openai", "sin_clave", "no hay clave de Nano Banana 2.1 (Google AI) puesta")
     respuesta, fallo = _pedir(
         "GET",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-nano-banana-2.1",
-        headers={"x-goog-api-key": clave, "Authorization": f"Bearer {clave}"},
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+        headers={"x-goog-api-key": clave},
     )
     if respuesta is None:
         return _ficha("openai", "sin_red", f"no se ha podido hablar con Google AI: {fallo}")

@@ -196,7 +196,11 @@ def prueba_claves():
     def falso(metodo, url, **kw):
         peticiones.append((metodo, url, kw))
         if "openai" in url or "generativelanguage" in url:
-            return (RespuestaFalsa(200, {"data": []}) if kw["headers"]["Authorization"] == "Bearer buena"
+            ok_key = (
+                kw["headers"].get("x-goog-api-key") == "buena"
+                or kw["headers"].get("Authorization") == "Bearer buena"
+            )
+            return (RespuestaFalsa(200, {"models": []}) if ok_key
                     else RespuestaFalsa(401, {"error": {"message": "Incorrect API key"}})), ""
         if "cartesia" in url:
             return (RespuestaFalsa(200, []) if kw["headers"]["X-API-Key"] == "buena"
