@@ -105,7 +105,7 @@ def _esperar_turno(cuenta=None):
 #: minuto es de 60 s, asi que esperar menos es garantizar otro 429.
 ESPERA_LIMITE_S = 65.0
 #: Tope de una espera, por si la API pide algo absurdo.
-ESPERA_MAXIMA_S = 300.0
+ESPERA_MAXIMA_S = 60.0
 
 # ------------------------------------------------------------------ el cubo
 #
@@ -1031,16 +1031,19 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                 "cuota o credito, asi que no se pueden generar mas imagenes. "
                 "Revisa tu facturacion en Google AI Studio y retoma la "
                 "generacion: lo ya generado NO se pierde ni se vuelve a pagar.")
-        if r.status_code == 429 and intento < reintentos:
-            # el freno es de todas las cadenas DE ESA CUENTA: si lo pone una,
-            # las demas tampoco salen a llamar con esa clave hasta que su
-            # ventana se renueve; el proximo intento puede elegir otra cuenta
-            techo_antes = cuenta.techo[0]
-            _frenar(_cuanto_esperar(r), _motivo_limite(r, cuenta), cuenta)
-            # y lo que dijo, aprendido y guardado (ver «lo que se aprende»)
-            if cuenta_fija is None:
-                _aprender_del_429(cuenta, techo_antes)
-            continue
+        if r.status_code == 429:
+            espera = _cuanto_esperar(r)
+            if (espera >= 60.0 or intento >= 1) and shutil.which("agy"):
+                print(f"[imagen] Google AI saturado o con cuota agotada (espera {espera:.0f}s, intento {intento + 1}). "
+                      f"Haciendo fallback automatico al generador de imagenes de agy...", flush=True)
+                return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
+            if intento < reintentos:
+                techo_antes = cuenta.techo[0]
+                _frenar(espera, _motivo_limite(r, cuenta), cuenta)
+                # y lo que dijo, aprendido y guardado (ver «lo que se aprende»)
+                if cuenta_fija is None:
+                    _aprender_del_429(cuenta, techo_antes)
+                continue
         if r.status_code in (500, 502, 503, 504) and intento < reintentos:
             time.sleep(min(3 * (intento + 1), 30))
             continue
