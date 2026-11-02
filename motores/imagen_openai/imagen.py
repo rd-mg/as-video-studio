@@ -21,6 +21,7 @@ import io
 import json
 import os
 import re
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -482,7 +483,7 @@ def _cuentas():
     _CUENTAS_CARGADAS[:] = nuevas
     _SELLO_CLAVES[0] = sello
     if len(_CUENTAS_CARGADAS) > 1:
-        print(f"[imagen] {len(_CUENTAS_CARGADAS)} cuentas de OpenAI: las "
+        print(f"[imagen] {len(_CUENTAS_CARGADAS)} cuentas de Google AI: las "
               f"llamadas se reparten y cada una lleva su propio limite",
               flush=True)
     return _CUENTAS_CARGADAS
@@ -515,14 +516,13 @@ def _elegir_cuenta(cuantas):
     vivas = [c for c in todas if not c.sin_saldo and not c.clave_rechazada]
     if not vivas and all(c.clave_rechazada for c in todas):
         raise RuntimeError(
-            "OpenAI rechaza todas las claves que hay (401 Incorrect API key): "
+            "Google AI rechaza todas las claves que hay (401 API key invalid): "
             "revisalas en Configuracion > Claves. Lo ya generado no se pierde.")
     if not vivas:
         raise SinSaldo(
-            "todas las cuentas de OpenAI se han quedado sin credito, asi que "
-            "no se pueden generar mas imagenes. Recarga en "
-            "https://platform.openai.com/settings/organization/billing y "
-            "retoma la generacion: lo ya generado NO se pierde ni se vuelve "
+            "todas las cuentas de Google AI se han quedado sin credito o cuota, asi que "
+            "no se pueden generar mas imagenes con API key. Recarga o activa la facturacion en "
+            "https://aistudio.google.com/ y retoma la generacion: lo ya generado NO se pierde ni se vuelve "
             "a pagar.")
     if len(vivas) == 1:
         return vivas[0]
@@ -814,6 +814,80 @@ def _extraer_respuesta_imagen(payload, tamano):
     return png, usage
 
 
+def _generar_con_agy(prompt, referencias, *, quality="low", tamano="apaisado"):
+    """Genera la imagen usando el CLI `agy` y su subagente integrado `image-generator`.
+
+    Permite generar imagenes aprovechando la suscripcion activa del CLI agy sin requerir
+    facturacion separada en Google AI Studio.
+    """
+    import subprocess
+    import tempfile
+
+    aspecto = ASPECTOS.get(tamano, "16:9")
+    refs_existentes = [os.path.abspath(r) for r in (referencias or []) if os.path.exists(r)][:3]
+
+    prompt_agente = (
+        "Invoke the `image-generator` subagent (TypeName=\"image-generator\", Model=\"inherit\") ONCE. "
+        "Instruct the subagent to call `generate_image` with exact arguments:\n"
+        f"- AspectRatio: {json.dumps(aspecto)}\n"
+        f"- ImageName: \"escena\"\n"
+        f"- ImagePaths: {json.dumps(refs_existentes)}\n"
+        f"- Prompt: {json.dumps(prompt)}\n\n"
+        "After the subagent replies with the generated image path, do NOT run any shell commands or tools; "
+        "reply ONLY with the exact absolute file path of the generated image."
+    )
+
+    with tempfile.TemporaryDirectory(prefix="agy_img_") as tmp_dir:
+        t0 = time.time()
+        p = subprocess.run(
+            [
+                "agy", "-p", prompt_agente,
+                "--output-format", "json",
+                "--model", "gemini-3.8-flash",
+                "--effort", "low",
+                "--mode", "accept-edits",
+                "--settings", json.dumps({"allowNonWorkspaceAccess": True}),
+            ],
+            cwd=tmp_dir,
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+        segundos = time.time() - t0
+
+        rutas_encontradas = []
+        salida_completa = (p.stdout or "") + "\n" + (p.stderr or "")
+        for m in re.finditer(r'(/[\w\-./]+\.(?:jpg|jpeg|png|webp))', salida_completa):
+            ruta_cand = m.group(1).rstrip(".,;\"'")
+            if os.path.isfile(ruta_cand):
+                rutas_encontradas.append(ruta_cand)
+
+        if not rutas_encontradas:
+            raise RuntimeError(
+                f"El CLI agy no devolvio una imagen valida (codigo {p.returncode}): "
+                f"{(p.stdout or p.stderr)[:300]}"
+            )
+
+        ruta_elegida = rutas_encontradas[-1]
+        try:
+            with open(ruta_elegida, "rb") as fh:
+                img_bytes = fh.read()
+        except OSError as e:
+            raise RuntimeError(f"No se pudo leer la imagen generada por agy en {ruta_elegida}: {e}")
+
+        png = _ajustar_tamano_png(img_bytes, tamano)
+        _gasto["llamadas"] += 1
+        return png, {
+            "segundos": round(segundos, 1),
+            "quality": quality,
+            "refs": len(refs_existentes),
+            "coste": 0.0,
+            "modelo": "agy-image-generator",
+            "tamano": TAMANOS.get(tamano, "1536x1024"),
+            "usage": {"total_tokens": 0},
+        }
+
+
 def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             api_key=None, reintentos=6):
     referencias = list(referencias or [])
@@ -828,7 +902,14 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
     r = None
 
     for intento in range(reintentos + 1):
-        cuenta = cuenta_fija or _elegir_cuenta(len(referencias))
+        try:
+            cuenta = cuenta_fija or _elegir_cuenta(len(referencias))
+        except SinSaldo as sin_saldo_err:
+            if shutil.which("agy"):
+                print(f"[imagen] Google AI sin saldo ({sin_saldo_err}). "
+                      f"Usando generador integrado de agy...", flush=True)
+                return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
+            raise
         _esperar_turno(cuenta)
         _pedir_ficha(len(referencias), cuenta)
         cabeceras = {
@@ -848,6 +929,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             })
         partes.append({"text": prompt})
         datos = {
+            "model": _MODELO_RESUELTO[0] or MODELO,
             "contents": [{"parts": partes}],
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
@@ -877,6 +959,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                 r = requests.post(url_cand, headers=cabeceras, json=datos, timeout=600)
                 if r.status_code == 400 and "imagesize" in r.text.lower():
                     datos_sin_size = {
+                        "model": candidato,
                         "contents": [{"parts": partes}],
                         "generationConfig": {
                             "responseModalities": ["IMAGE"],
@@ -925,6 +1008,9 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                             for c in _cuentas()) \
                     and intento < reintentos:
                 continue
+            if shutil.which("agy"):
+                print("[imagen] Claves de Google AI no validas. Usando generador integrado de agy...", flush=True)
+                return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
             raise RuntimeError(
                 f"Google AI rechaza la clave de {cuenta.nombre} ({r.status_code}): "
                 f"revisala en Configuracion > Claves. {ultimo_error}")
@@ -936,6 +1022,10 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                 print(f"[imagen] {cuenta.nombre} sin credito: se sigue con "
                       f"las demas", flush=True)
                 continue
+            if shutil.which("agy"):
+                print("[imagen] Google AI sin credito en todas las cuentas. "
+                      "Usando generador integrado de agy...", flush=True)
+                return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
             raise SinSaldo(
                 "la cuenta de Google AI (Nano Banana 2.1) se ha quedado sin "
                 "cuota o credito, asi que no se pueden generar mas imagenes. "
@@ -971,6 +1061,10 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
         break
 
     if r is not None and r.status_code == 429:
+        if shutil.which("agy"):
+            print("[imagen] Google AI saturada por limite de peticiones tras reintentos. "
+                  "Usando generador integrado de agy...", flush=True)
+            return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
         raise RuntimeError(
             "la API de imagen sigue diciendo que vamos demasiado rapido despues "
             f"de {reintentos} esperas. Su limite que salta es el de IMAGENES DE "
@@ -1001,7 +1095,7 @@ def _segundos_de(crudo, por_defecto):
 def _cuanto_esperar(respuesta):
     """Segundos que hay que esperar, preguntandoselo a la API y no inventando.
 
-    Por orden: la cabecera 'retry-after', el «try again in 4.2s» que la propia
+    Por orden: la cabecera 'retry-after', el «try again in 4.2s» o «retryDelay» que la propia
     API escribe en su mensaje, y si no dice nada, la ventana entera. Esperar
     menos que la ventana con un limite POR MINUTO es garantizar otro 429.
     """
@@ -1010,8 +1104,11 @@ def _cuanto_esperar(respuesta):
         segundos = _segundos_de(cabecera, 0.0)
         if segundos:
             return min(max(segundos, 1.0), ESPERA_MAXIMA_S)
-    encaje = re.search(r"try again in ([\d.]+)\s*(ms|s|m)\b",
-                       respuesta.text or "", re.I)
+    texto = respuesta.text or ""
+    encaje = re.search(r"(?:try again in|retry in|please retry after)\s*([\d.]+)\s*(ms|s|m)?\b",
+                       texto, re.I)
+    if not encaje:
+        encaje = re.search(r'retryDelay["\s:]+([\d.]+)\s*(ms|s|m)?', texto, re.I)
     if encaje:
         # un margen: la ventana se mide en el servidor y su reloj no es el mio
         segundos = _segundos_de(encaje.group(1) + (encaje.group(2) or "s"), 0.0)
@@ -1043,7 +1140,7 @@ class SinSaldo(RuntimeError):
 
 
 def _sin_saldo(respuesta):
-    """Si el 429 es por falta de credito y no por ir demasiado rapido.
+    """Si el 429 es por falta de credito/cuota y no por ir demasiado rapido.
 
     Se mira el CODIGO del error y no el texto suelto. Buscando 'billing' en el
     cuerpo, un 429 de velocidad que mencionara la pagina de facturacion se leia
@@ -1059,16 +1156,25 @@ def _sin_saldo(respuesta):
         error = (respuesta.json() or {}).get("error") or {}
         codigo = str(error.get("code") or "").lower()
         tipo = str(error.get("type") or "").lower()
-    except ValueError:
+    except Exception:
         pass
     if "rate_limit" in codigo or "rate_limit" in tipo:
         return False
+    texto = (respuesta.text or "").lower()
+    # Si la API da una indicacion de reintento temporal, es un 429 de velocidad
+    if any(p in texto for p in ("try again in", "retry in", "retrydelay", "please retry")):
+        return False
     if "insufficient_quota" in (codigo, tipo):
         return True
-    texto = (respuesta.text or "").lower()
-    return ("insufficient_quota" in texto
-            or "no credits remaining" in texto
-            or "exceeded your current quota" in texto)
+    if "limit: 0" in texto or "limit 0" in texto or "limit_value: 0" in texto or "free_tier" in texto:
+        return True
+    if "no credits remaining" in texto:
+        return True
+    if "insufficient_quota" in texto:
+        return True
+    if "exceeded your current quota" in texto and not any(p in texto for p in ("retry", "rate_limit", "rate limit")):
+        return True
+    return False
 
 
 def generar_lote(trabajos, *, concurrencia=4):
