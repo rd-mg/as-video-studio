@@ -105,7 +105,11 @@ _ENLACE = re.compile(
 )
 
 #: La linea con la que el CLI explica un fallo.
-_FALLO = re.compile(r"^\s*(Login failed:.*|Error:.*|Authentication failed.*)$", re.M | re.I)
+_FALLO = re.compile(
+    r"(?:^|[\r\n])\s*(Login failed:[^\r\n]*|Error:[^\r\n]*|Authentication failed[^\r\n]*|Got an error:[^\r\n]*)",
+    re.I,
+)
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b.")
 
 #: Lo que el CLI escribe DELANTE del hueco donde espera el codigo. Sirve para
 #: quedarse solo con lo que dijo despues de que se le pasara uno.
@@ -117,6 +121,7 @@ _LOCK = threading.RLock()
 #: id de cuenta -> Intento. Vive en memoria a proposito: recargar la pagina
 #: tiene que encontrarlo, cerrar el servicio tiene que perderlo.
 _INTENTOS = {}
+_POPEN_ORIGINAL = subprocess.Popen
 
 
 class ErrorLogin(RuntimeError):
@@ -276,6 +281,7 @@ class Intento:
         self.ficha = {}
         self.arranque = time.time()
         self.proceso = None
+        self._pty_maestro = None
         self._trozos = []
         self._lock = threading.RLock()
 
@@ -293,11 +299,22 @@ class Intento:
                 "cuenta_conectada": self.ficha,
             }
 
-    # -- la salida del CLI, tal cual
+    # -- la salida del CLI, tal cual (sin secuencias ANSI de terminal)
     def _texto(self):
-        return b"".join(self._trozos).decode("utf-8", errors="replace")
+        crudo = b"".join(self._trozos).decode("utf-8", errors="replace")
+        return _ANSI.sub("", crudo)
 
     def _bombear(self):
+        if self._pty_maestro is not None:
+            while True:
+                try:
+                    trozo = os.read(self._pty_maestro, 1024)
+                except OSError:
+                    break
+                if not trozo:
+                    break
+                self._trozos.append(trozo)
+            return
         flujo = self.proceso.stdout
         while True:
             trozo = flujo.read(1)
@@ -314,22 +331,79 @@ class Intento:
         # NO ABRIR NAVEGADOR: medido, sin esto sale un Edge en la maquina. Ver
         # la cabecera del modulo.
         entorno["BROWSER"] = "none"
-        orden_login = [exe, "-p", "ok"] if _es_agy(exe) else [exe, "auth", "login", "--claudeai"]
-        try:
-            self.proceso = subprocess.Popen(
-                orden_login,
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, cwd=self.carpeta, env=entorno,
-                **cli_claude.SIN_VENTANA)
-        except OSError as fallo:
-            raise ErrorLogin(
-                f"no se ha podido lanzar el CLI: {fallo}") from fallo
+        usar_pty_agy = (_es_agy(exe) and os.name != "nt"
+                        and subprocess.Popen is _POPEN_ORIGINAL)
+        orden_login = ([exe] if usar_pty_agy
+                       else ([exe, "-p", "ok"] if _es_agy(exe)
+                             else [exe, "auth", "login", "--claudeai"]))
+        if usar_pty_agy:
+            import fcntl
+            import pty
+            import struct
+            import termios
+            maestro, esclavo = pty.openpty()
+            try:
+                fcntl.ioctl(esclavo, termios.TIOCSWINSZ,
+                            struct.pack("HHHH", 50, 2000, 0, 0))
+                atributos = termios.tcgetattr(esclavo)
+                atributos[3] &= ~termios.ECHO
+                termios.tcsetattr(esclavo, termios.TCSANOW, atributos)
+            except OSError:
+                pass
+
+            def _sesion_pty():
+                os.setsid()
+                try:
+                    fcntl.ioctl(esclavo, termios.TIOCSCTTY, 0)
+                except OSError:
+                    pass
+
+            self._pty_maestro = maestro
+            entorno["TERM"] = entorno.get("TERM") or "xterm-256color"
+            try:
+                self.proceso = subprocess.Popen(
+                    orden_login,
+                    stdin=esclavo, stdout=esclavo, stderr=esclavo,
+                    cwd=self.carpeta, env=entorno,
+                    preexec_fn=_sesion_pty, close_fds=True)
+            except OSError as fallo:
+                try:
+                    os.close(maestro)
+                except OSError:
+                    pass
+                self._pty_maestro = None
+                raise ErrorLogin(
+                    f"no se ha podido lanzar el CLI: {fallo}") from fallo
+            finally:
+                try:
+                    os.close(esclavo)
+                except OSError:
+                    pass
+        else:
+            try:
+                self.proceso = subprocess.Popen(
+                    orden_login,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, cwd=self.carpeta, env=entorno,
+                    **cli_claude.SIN_VENTANA)
+            except OSError as fallo:
+                raise ErrorLogin(
+                    f"no se ha podido lanzar el CLI: {fallo}") from fallo
         threading.Thread(target=self._bombear, daemon=True).start()
 
+        enviado_enter = False
         limite = time.time() + ESPERA_ENLACE_S
         while time.time() < limite:
-            hallado = _ENLACE.search(self._texto())
-            if hallado:
+            texto_actual = self._texto()
+            if (self._pty_maestro is not None and not enviado_enter
+                    and "Google OAuth" in texto_actual):
+                try:
+                    os.write(self._pty_maestro, b"\r")
+                    enviado_enter = True
+                except OSError:
+                    pass
+            hallado = _ENLACE.search(texto_actual)
+            if hallado and (not usar_pty_agy or "state=" in hallado.group(0)):
                 with self._lock:
                     self.enlace = hallado.group(0)
                     self.estado = "enlace"
@@ -364,9 +438,14 @@ class Intento:
                                 "codigo; vuelve a darle a Entrar")
             return self.ver()
         marca = len(self._texto())
+        salto = "\r" if self._pty_maestro is not None else "\n"
+        datos = (codigo + salto).encode("utf-8")
         try:
-            self.proceso.stdin.write((codigo + "\n").encode("utf-8"))
-            self.proceso.stdin.flush()
+            if self._pty_maestro is not None:
+                os.write(self._pty_maestro, datos)
+            else:
+                self.proceso.stdin.write(datos)
+                self.proceso.stdin.flush()
         except OSError as fallo:
             with self._lock:
                 self.estado = "fallo"
@@ -384,20 +463,37 @@ class Intento:
         # La regla es generica a proposito, para que no dependa de como esten
         # escritas esas frases hoy: si ha dicho algo nuevo y sigue vivo pasado
         # un momento, es que lo esta volviendo a pedir.
+        es_agy = _es_agy()
+        ruta_secreto = os.path.join(
+            self.carpeta, ".config", "antigravity", "plugin-secrets.json")
         limite = time.time() + ESPERA_CODIGO_S
         dijo_algo = 0.0
         while time.time() < limite and self.proceso.poll() is None:
-            if not dijo_algo and len(self._texto()) > marca:
-                dijo_algo = time.time()
-            if dijo_algo and time.time() - dijo_algo > ASENTAR_S:
-                with self._lock:
-                    self.estado = "enlace"          # el enlace sigue valiendo
-                    self.mensaje = _ultima_linea(self._texto()[marca:]) or (
-                        "ese codigo no le ha valido; copialo entero, incluido "
-                        "todo lo que va detras de la almohadilla")
-                return self.ver()
+            if es_agy:
+                nuevo = self._texto()[marca:].lower()
+                if ("authentication successful" in nuevo
+                        or (os.path.isfile(ruta_secreto)
+                            and os.path.getsize(ruta_secreto) > 10)):
+                    time.sleep(0.5)
+                    self.matar()
+                    break
+                if ("got an error:" in nuevo
+                        or "authentication failed" in nuevo):
+                    time.sleep(0.2)
+                    self.matar()
+                    break
+            else:
+                if not dijo_algo and len(self._texto()) > marca:
+                    dijo_algo = time.time()
+                if dijo_algo and time.time() - dijo_algo > ASENTAR_S:
+                    with self._lock:
+                        self.estado = "enlace"          # el enlace sigue valiendo
+                        self.mensaje = _ultima_linea(self._texto()[marca:]) or (
+                            "ese codigo no le ha valido; copialo entero, incluido "
+                            "todo lo que va detras de la almohadilla")
+                    return self.ver()
             time.sleep(0.2)
-        if self.proceso.poll() is None:
+        if self.proceso is not None and self.proceso.poll() is None:
             self.matar()
             with self._lock:
                 self.estado = "fallo"
@@ -422,6 +518,12 @@ class Intento:
 
     def matar(self):
         proceso, self.proceso = self.proceso, None
+        maestro, self._pty_maestro = self._pty_maestro, None
+        if maestro is not None:
+            try:
+                os.close(maestro)
+            except OSError:
+                pass
         if proceso is None:
             return
         try:

@@ -426,11 +426,17 @@ def entorno(cuenta=None):
         limpio.pop(clave, None)
     carpeta = (cuenta or {}).get("config_dir") if isinstance(cuenta, dict) else None
     if carpeta:
+        carpeta_abs = os.path.abspath(carpeta)
         limpio["CLAUDE_CONFIG_DIR"] = carpeta
-        limpio["AGY_CONFIG_DIR"] = carpeta
-        limpio["HOME"] = carpeta
-        limpio["USERPROFILE"] = carpeta
+        limpio["AGY_CONFIG_DIR"] = carpeta_abs
+        limpio["ANTIGRAVITY_APP_DATA_DIR"] = os.path.join(
+            carpeta_abs, ".gemini", "antigravity-cli")
+        limpio["HOME"] = carpeta_abs
+        limpio["USERPROFILE"] = carpeta_abs
         limpio["DBUS_SESSION_BUS_ADDRESS"] = "invalid"
+        for k in ("ANTIGRAVITY_LS_ADDRESS", "ANTIGRAVITY_CSRF_TOKEN",
+                  "ANTIGRAVITY_GEMINI_DIR"):
+            limpio.pop(k, None)
     return limpio
 
 
