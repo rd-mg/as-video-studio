@@ -6442,6 +6442,14 @@ def _sesion_de(cuenta, refrescar=False):
             and ficha["carpeta"] == cuenta["config_dir"]):
         return ficha["sesion"]
     sesion = login.situacion(cuenta["config_dir"])
+    if (sesion.get("conectada") and cuenta.get("config_dir")
+            and not cuenta.get("entrada") and cuenta.get("id") != "__defecto__"):
+        try:
+            _claves().apuntar_cuenta_cli(
+                cuenta["id"], config_dir=cuenta["config_dir"], entrada=True)
+            cuenta["entrada"] = True
+        except Exception:  # noqa: BLE001
+            pass
     _ESTADO_CLI[llave] = {"cuando": time.time(), "sesion": sesion,
                           "carpeta": cuenta["config_dir"]}
     return sesion
@@ -6538,6 +6546,8 @@ def entrar_cuenta_cli(cid: str):
         if carpeta != cuenta["config_dir"]:
             modulo.apuntar_cuenta_cli(cid, config_dir=carpeta)
         ficha = login.entrar(cid, carpeta)
+        if ficha.get("estado") == "dentro":
+            modulo.apuntar_cuenta_cli(cid, config_dir=carpeta, entrada=True)
     except modulo.ErrorClaves as fallo:
         raise ErrorApi(400, str(fallo))
     except login.ErrorLogin as fallo:

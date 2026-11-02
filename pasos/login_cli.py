@@ -149,11 +149,52 @@ def _es_agy(ejecutable=None):
     return os.path.basename(str(exe)).lower().startswith("agy")
 
 
+def _sembrar_desde_home(carpeta):
+    """Si el servidor ya tiene `agy` autenticado en el HOME del servicio y esta
+    carpeta de cuenta aun no tiene credenciales propias, las hereda para no
+    obligar a repetir el login en consola.
+    """
+    if not carpeta or os.environ.get("ESTUDIO_SIMULAR") or subprocess.Popen is not _POPEN_ORIGINAL:
+        return
+    if not _es_agy():
+        return
+    destino_sec = os.path.join(carpeta, ".config", "antigravity", "plugin-secrets.json")
+    if os.path.isfile(destino_sec) and os.path.getsize(destino_sec) > 10:
+        return
+    home = os.path.expanduser("~")
+    if not home or os.path.abspath(home) == os.path.abspath(carpeta):
+        return
+    origen_cfg = os.path.join(home, ".config", "antigravity")
+    origen_sec = os.path.join(origen_cfg, "plugin-secrets.json")
+    if not (os.path.isfile(origen_sec) and os.path.getsize(origen_sec) > 10):
+        return
+    import shutil as _shutil
+    try:
+        os.makedirs(os.path.join(carpeta, ".config"), exist_ok=True)
+        _shutil.copytree(origen_cfg, os.path.join(carpeta, ".config", "antigravity"),
+                         dirs_exist_ok=True)
+        for rel in (
+            os.path.join(".gemini", "config", "config.json"),
+            os.path.join(".gemini", "antigravity-cli", "settings.json"),
+            os.path.join(".gemini", "antigravity-cli", "installation_id"),
+            os.path.join(".gemini", "antigravity-cli", "jetski_state.pbtxt"),
+        ):
+            orig = os.path.join(home, rel)
+            if os.path.isfile(orig):
+                dest = os.path.join(carpeta, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                _shutil.copy2(orig, dest)
+    except OSError:
+        pass
+
+
 def _entorno_cuenta(carpeta=""):
+    if carpeta:
+        _sembrar_desde_home(carpeta)
     entorno = cli_claude.entorno({"config_dir": carpeta} if carpeta else None)
     if carpeta and _es_agy():
-        entorno["HOME"] = carpeta
-        entorno["USERPROFILE"] = carpeta
+        entorno["HOME"] = os.path.abspath(carpeta)
+        entorno["USERPROFILE"] = os.path.abspath(carpeta)
     return entorno
 
 
@@ -333,6 +374,15 @@ class Intento:
         entorno["BROWSER"] = "none"
         usar_pty_agy = (_es_agy(exe) and os.name != "nt"
                         and subprocess.Popen is _POPEN_ORIGINAL)
+        if usar_pty_agy and self.carpeta:
+            _sembrar_desde_home(self.carpeta)
+            ya = situacion(self.carpeta)
+            if ya.get("conectada"):
+                with self._lock:
+                    self.ficha = ya
+                    self.estado = "dentro"
+                    self.mensaje = ""
+                return self.ver()
         orden_login = ([exe] if usar_pty_agy
                        else ([exe, "-p", "ok"] if _es_agy(exe)
                              else [exe, "auth", "login", "--claudeai"]))
