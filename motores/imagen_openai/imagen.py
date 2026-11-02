@@ -888,6 +888,10 @@ def _preparar_refs_para_agy(referencias, tmp_dir, max_refs=2, lado_max=768):
     return refs_optimizadas
 
 
+_CANDADO_AGY = threading.Lock()
+_AGY_LIBRE_EN = [0.0]
+
+
 def _generar_con_agy(prompt, referencias, *, quality="low", tamano="apaisado"):
     """Genera la imagen usando el CLI `agy` y su subagente integrado `image-generator`.
 
@@ -901,94 +905,111 @@ def _generar_con_agy(prompt, referencias, *, quality="low", tamano="apaisado"):
     referencias = list(referencias or [])
     ultimo_error = None
 
-    for intento in range(3):
-        with tempfile.TemporaryDirectory(prefix="agy_img_") as tmp_dir:
-            if intento == 0:
-                refs_a_usar = _preparar_refs_para_agy(referencias, tmp_dir, max_refs=2, lado_max=768)
-            elif intento == 1:
-                refs_a_usar = _preparar_refs_para_agy(referencias, tmp_dir, max_refs=1, lado_max=512)
-            else:
-                refs_a_usar = []
+    # Serializamos las llamadas a agy: ejecutar múltiples subagentes agy en paralelo
+    # agota instantáneamente la cuota de peticiones concurrentes (429 RESOURCE_EXHAUSTED).
+    with _CANDADO_AGY:
+        for intento in range(4):
+            ahora = time.monotonic()
+            if _AGY_LIBRE_EN[0] > ahora:
+                espera = _AGY_LIBRE_EN[0] - ahora
+                print(f"[imagen] agy enfriando ventana de cuota (429): esperando {espera:.0f}s...", flush=True)
+                time.sleep(espera)
 
-            args_gen = {
-                "AspectRatio": aspecto,
-                "ImageName": f"escena_{intento}",
-                "Prompt": str(prompt or "")[:1500],
-            }
-            if refs_a_usar:
-                args_gen["ImagePaths"] = refs_a_usar
+            with tempfile.TemporaryDirectory(prefix="agy_img_") as tmp_dir:
+                if intento == 0:
+                    refs_a_usar = _preparar_refs_para_agy(referencias, tmp_dir, max_refs=2, lado_max=768)
+                elif intento == 1:
+                    refs_a_usar = _preparar_refs_para_agy(referencias, tmp_dir, max_refs=1, lado_max=512)
+                else:
+                    refs_a_usar = []
 
-            prompt_agente = (
-                "Invoke the `image-generator` subagent (TypeName=\"image-generator\", Model=\"inherit\") to generate an image. "
-                f"Instruct the subagent to call `generate_image` with exact arguments:\n{json.dumps(args_gen, indent=2)}\n\n"
-                "If the tool returns a 503 Deadline expired or Service Unavailable error, retry generate_image once without ImagePaths. "
-                "Reply ONLY with the exact absolute file path of the generated image."
-            )
+                args_gen = {
+                    "AspectRatio": aspecto,
+                    "ImageName": f"escena_{intento}",
+                    "Prompt": str(prompt or "")[:1500],
+                }
+                if refs_a_usar:
+                    args_gen["ImagePaths"] = refs_a_usar
 
-            t0 = time.time()
-            try:
-                p = subprocess.run(
-                    [
-                        "agy", "-p", prompt_agente,
-                        "--output-format", "json",
-                        "--model", "gemini-3.8-flash",
-                        "--effort", "low",
-                        "--mode", "accept-edits",
-                        "--settings", json.dumps({"allowNonWorkspaceAccess": True}),
-                    ],
-                    cwd=tmp_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=240,
+                prompt_agente = (
+                    "Invoke the `image-generator` subagent (TypeName=\"image-generator\", Model=\"inherit\") to generate an image. "
+                    f"Instruct the subagent to call `generate_image` with exact arguments:\n{json.dumps(args_gen, indent=2)}\n\n"
+                    "If the tool returns a 503 Deadline expired or Service Unavailable error, retry generate_image once without ImagePaths. "
+                    "Reply ONLY with the exact absolute file path of the generated image."
                 )
-                segundos = time.time() - t0
-            except subprocess.TimeoutExpired:
-                print(f"[imagen] agy intento {intento + 1} supero el tiempo limite de 240s", flush=True)
-                ultimo_error = "TimeoutExpired en el CLI agy"
-                continue
 
-            rutas_encontradas = []
-            salida_completa = (p.stdout or "") + "\n" + (p.stderr or "")
-            for m in re.finditer(r'(/[\w\-./]+\.(?:jpg|jpeg|png|webp))', salida_completa):
-                ruta_cand = m.group(1).rstrip(".,;\"'")
-                if os.path.isfile(ruta_cand):
-                    rutas_encontradas.append(ruta_cand)
-
-            if not rutas_encontradas:
-                ultimo_error = (
-                    f"El CLI agy no devolvio una imagen valida (codigo {p.returncode}): "
-                    f"{(p.stdout or p.stderr)[:300]}"
-                )
-                es_503 = "503" in salida_completa or "deadline expired" in salida_completa.lower()
-                if es_503:
-                    print(f"[imagen] agy intento {intento + 1}: error transitorio 503 / deadline en Google AI; "
-                          f"reintentando con referencias reducidas...", flush=True)
-                    time.sleep(3.0 * (intento + 1))
+                t0 = time.time()
+                try:
+                    p = subprocess.run(
+                        [
+                            "agy", "-p", prompt_agente,
+                            "--output-format", "json",
+                            "--model", "gemini-3.8-flash",
+                            "--effort", "low",
+                            "--mode", "accept-edits",
+                            "--settings", json.dumps({"allowNonWorkspaceAccess": True}),
+                        ],
+                        cwd=tmp_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=240,
+                    )
+                    segundos = time.time() - t0
+                except subprocess.TimeoutExpired:
+                    print(f"[imagen] agy intento {intento + 1} supero el tiempo limite de 240s", flush=True)
+                    ultimo_error = "TimeoutExpired en el CLI agy"
                     continue
-                time.sleep(2.0)
-                continue
 
-            ruta_elegida = rutas_encontradas[-1]
-            try:
-                with open(ruta_elegida, "rb") as fh:
-                    img_bytes = fh.read()
-            except OSError as e:
-                ultimo_error = f"No se pudo leer la imagen generada por agy en {ruta_elegida}: {e}"
-                continue
+                rutas_encontradas = []
+                salida_completa = (p.stdout or "") + "\n" + (p.stderr or "")
+                for m in re.finditer(r'(/[\w\-./]+\.(?:jpg|jpeg|png|webp))', salida_completa):
+                    ruta_cand = m.group(1).rstrip(".,;\"'")
+                    if os.path.isfile(ruta_cand):
+                        rutas_encontradas.append(ruta_cand)
 
-            png = _ajustar_tamano_png(img_bytes, tamano)
-            _gasto["llamadas"] += 1
-            return png, {
-                "segundos": round(segundos, 1),
-                "quality": quality,
-                "refs": len(refs_a_usar),
-                "coste": 0.0,
-                "modelo": "agy-image-generator",
-                "tamano": TAMANOS.get(tamano, "1536x1024"),
-                "usage": {"total_tokens": 0},
-            }
+                if not rutas_encontradas:
+                    ultimo_error = (
+                        f"El CLI agy no devolvio una imagen valida (codigo {p.returncode}): "
+                        f"{(p.stdout or p.stderr)[:300]}"
+                    )
+                    es_429 = "429" in salida_completa or "resource_exhaust" in salida_completa.lower() or "quota exhaustion" in salida_completa.lower()
+                    if es_429:
+                        espera_429 = 35.0
+                        print(f"[imagen] agy alcanzo limite de cuota temporal (429 RESOURCE_EXHAUSTED). Esperando {espera_429:.0f}s...", flush=True)
+                        _AGY_LIBRE_EN[0] = time.monotonic() + espera_429
+                        time.sleep(espera_429)
+                        continue
 
-    raise RuntimeError(ultimo_error or "No se pudo generar la imagen con el CLI agy tras 3 intentos.")
+                    es_503 = "503" in salida_completa or "deadline expired" in salida_completa.lower()
+                    if es_503:
+                        print(f"[imagen] agy intento {intento + 1}: error transitorio 503 / deadline en Google AI; "
+                              f"reintentando con referencias reducidas...", flush=True)
+                        time.sleep(3.0 * (intento + 1))
+                        continue
+                    time.sleep(2.0)
+                    continue
+
+                ruta_elegida = rutas_encontradas[-1]
+                try:
+                    with open(ruta_elegida, "rb") as fh:
+                        img_bytes = fh.read()
+                except OSError as e:
+                    ultimo_error = f"No se pudo leer la imagen generada por agy en {ruta_elegida}: {e}"
+                    continue
+
+                png = _ajustar_tamano_png(img_bytes, tamano)
+                _gasto["llamadas"] += 1
+                return png, {
+                    "segundos": round(segundos, 1),
+                    "quality": quality,
+                    "refs": len(refs_a_usar),
+                    "coste": 0.0,
+                    "modelo": "agy-image-generator",
+                    "tamano": TAMANOS.get(tamano, "1536x1024"),
+                    "usage": {"total_tokens": 0},
+                }
+
+        raise RuntimeError(ultimo_error or "No se pudo generar la imagen con el CLI agy tras reintentos.")
 
 
 def generar(prompt, referencias, *, quality="low", tamano="apaisado",
