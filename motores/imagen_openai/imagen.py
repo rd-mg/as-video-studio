@@ -848,6 +848,26 @@ def _generar_imagen_predict(prompt, cuenta, *, tamano="apaisado", quality="low",
     return requests.post(url, headers=cabeceras, json=datos, timeout=300)
 
 
+def _preparar_refs_para_agy(referencias, tmp_dir, max_refs=2, lado_max=768):
+    """Optimiza referencias para el subagente agy reduciendo peso para evitar timeouts (503)."""
+    refs_optimizadas = []
+    for i, r in enumerate(referencias[:max_refs]):
+        r_abs = os.path.abspath(r)
+        if not os.path.isfile(r_abs):
+            continue
+        try:
+            with Image.open(r_abs) as im:
+                im = im.convert("RGB")
+                if max(im.size) > lado_max:
+                    im.thumbnail((lado_max, lado_max), Image.LANCZOS)
+                destino = os.path.join(tmp_dir, f"ref_agy_{i}.jpg")
+                im.save(destino, "JPEG", quality=85)
+                refs_optimizadas.append(destino)
+        except Exception:
+            pass
+    return refs_optimizadas
+
+
 def _generar_con_agy(prompt, referencias, *, quality="low", tamano="apaisado"):
     """Genera la imagen usando el CLI `agy` y su subagente integrado `image-generator`.
 
@@ -858,68 +878,97 @@ def _generar_con_agy(prompt, referencias, *, quality="low", tamano="apaisado"):
     import tempfile
 
     aspecto = ASPECTOS.get(tamano, "16:9")
-    refs_existentes = [os.path.abspath(r) for r in (referencias or []) if os.path.exists(r)][:3]
+    referencias = list(referencias or [])
+    ultimo_error = None
 
-    prompt_agente = (
-        "Invoke the `image-generator` subagent (TypeName=\"image-generator\", Model=\"inherit\") ONCE. "
-        "Instruct the subagent to call `generate_image` with exact arguments:\n"
-        f"- AspectRatio: {json.dumps(aspecto)}\n"
-        f"- ImageName: \"escena\"\n"
-        f"- ImagePaths: {json.dumps(refs_existentes)}\n"
-        f"- Prompt: {json.dumps(prompt)}\n\n"
-        "After the subagent replies with the generated image path, do NOT run any shell commands or tools; "
-        "reply ONLY with the exact absolute file path of the generated image."
-    )
+    for intento in range(3):
+        with tempfile.TemporaryDirectory(prefix="agy_img_") as tmp_dir:
+            if intento == 0:
+                refs_a_usar = _preparar_refs_para_agy(referencias, tmp_dir, max_refs=2, lado_max=768)
+            elif intento == 1:
+                refs_a_usar = _preparar_refs_para_agy(referencias, tmp_dir, max_refs=1, lado_max=512)
+            else:
+                refs_a_usar = []
 
-    with tempfile.TemporaryDirectory(prefix="agy_img_") as tmp_dir:
-        t0 = time.time()
-        p = subprocess.run(
-            [
-                "agy", "-p", prompt_agente,
-                "--output-format", "json",
-                "--model", "gemini-3.8-flash",
-                "--effort", "low",
-                "--mode", "accept-edits",
-                "--settings", json.dumps({"allowNonWorkspaceAccess": True}),
-            ],
-            cwd=tmp_dir,
-            capture_output=True,
-            text=True,
-            timeout=240,
-        )
-        segundos = time.time() - t0
+            args_gen = {
+                "AspectRatio": aspecto,
+                "ImageName": f"escena_{intento}",
+                "Prompt": str(prompt or "")[:1500],
+            }
+            if refs_a_usar:
+                args_gen["ImagePaths"] = refs_a_usar
 
-        rutas_encontradas = []
-        salida_completa = (p.stdout or "") + "\n" + (p.stderr or "")
-        for m in re.finditer(r'(/[\w\-./]+\.(?:jpg|jpeg|png|webp))', salida_completa):
-            ruta_cand = m.group(1).rstrip(".,;\"'")
-            if os.path.isfile(ruta_cand):
-                rutas_encontradas.append(ruta_cand)
-
-        if not rutas_encontradas:
-            raise RuntimeError(
-                f"El CLI agy no devolvio una imagen valida (codigo {p.returncode}): "
-                f"{(p.stdout or p.stderr)[:300]}"
+            prompt_agente = (
+                "Invoke the `image-generator` subagent (TypeName=\"image-generator\", Model=\"inherit\") to generate an image. "
+                f"Instruct the subagent to call `generate_image` with exact arguments:\n{json.dumps(args_gen, indent=2)}\n\n"
+                "If the tool returns a 503 Deadline expired or Service Unavailable error, retry generate_image once without ImagePaths. "
+                "Reply ONLY with the exact absolute file path of the generated image."
             )
 
-        ruta_elegida = rutas_encontradas[-1]
-        try:
-            with open(ruta_elegida, "rb") as fh:
-                img_bytes = fh.read()
-        except OSError as e:
-            raise RuntimeError(f"No se pudo leer la imagen generada por agy en {ruta_elegida}: {e}")
+            t0 = time.time()
+            try:
+                p = subprocess.run(
+                    [
+                        "agy", "-p", prompt_agente,
+                        "--output-format", "json",
+                        "--model", "gemini-3.8-flash",
+                        "--effort", "low",
+                        "--mode", "accept-edits",
+                        "--settings", json.dumps({"allowNonWorkspaceAccess": True}),
+                    ],
+                    cwd=tmp_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=240,
+                )
+                segundos = time.time() - t0
+            except subprocess.TimeoutExpired:
+                print(f"[imagen] agy intento {intento + 1} supero el tiempo limite de 240s", flush=True)
+                ultimo_error = "TimeoutExpired en el CLI agy"
+                continue
 
-        png = _ajustar_tamano_png(img_bytes, tamano)
-        _gasto["llamadas"] += 1
-        return png, {
-            "segundos": round(segundos, 1),
-            "quality": quality,
-            "refs": len(refs_existentes),
-            "coste": 0.0,
-            "modelo": "agy-image-generator",
-            "tamano": TAMANOS.get(tamano, "1536x1024"),
-            "usage": {"total_tokens": 0},
-        }
+            rutas_encontradas = []
+            salida_completa = (p.stdout or "") + "\n" + (p.stderr or "")
+            for m in re.finditer(r'(/[\w\-./]+\.(?:jpg|jpeg|png|webp))', salida_completa):
+                ruta_cand = m.group(1).rstrip(".,;\"'")
+                if os.path.isfile(ruta_cand):
+                    rutas_encontradas.append(ruta_cand)
+
+            if not rutas_encontradas:
+                ultimo_error = (
+                    f"El CLI agy no devolvio una imagen valida (codigo {p.returncode}): "
+                    f"{(p.stdout or p.stderr)[:300]}"
+                )
+                es_503 = "503" in salida_completa or "deadline expired" in salida_completa.lower()
+                if es_503:
+                    print(f"[imagen] agy intento {intento + 1}: error transitorio 503 / deadline en Google AI; "
+                          f"reintentando con referencias reducidas...", flush=True)
+                    time.sleep(3.0 * (intento + 1))
+                    continue
+                time.sleep(2.0)
+                continue
+
+            ruta_elegida = rutas_encontradas[-1]
+            try:
+                with open(ruta_elegida, "rb") as fh:
+                    img_bytes = fh.read()
+            except OSError as e:
+                ultimo_error = f"No se pudo leer la imagen generada por agy en {ruta_elegida}: {e}"
+                continue
+
+            png = _ajustar_tamano_png(img_bytes, tamano)
+            _gasto["llamadas"] += 1
+            return png, {
+                "segundos": round(segundos, 1),
+                "quality": quality,
+                "refs": len(refs_a_usar),
+                "coste": 0.0,
+                "modelo": "agy-image-generator",
+                "tamano": TAMANOS.get(tamano, "1536x1024"),
+                "usage": {"total_tokens": 0},
+            }
+
+    raise RuntimeError(ultimo_error or "No se pudo generar la imagen con el CLI agy tras 3 intentos.")
 
 
 def generar(prompt, referencias, *, quality="low", tamano="apaisado",
@@ -933,9 +982,18 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
     modelo_activo = modelo_configurado()
     if modelo_activo in ("agy-image-generator", "agy"):
         if shutil.which("agy"):
-            return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
-        print("[imagen] 'agy' no encontrado en el sistema; usando motor Google AI...", flush=True)
-        modelo_activo = MODELO
+            try:
+                return _generar_con_agy(prompt, referencias, quality=quality, tamano=tamano)
+            except Exception as agy_err:
+                print(f"[imagen] agy fallo ({agy_err}); comprobando si hay cuentas de Google AI...", flush=True)
+                cuentas_vivas = [c for c in _cuentas() if not c.sin_saldo and not c.clave_rechazada]
+                if not cuentas_vivas:
+                    raise
+                print("[imagen] Fallback a Google AI tras agotar intentos en agy...", flush=True)
+                modelo_activo = MODELO
+        else:
+            print("[imagen] 'agy' no encontrado en el sistema; usando motor Google AI...", flush=True)
+            modelo_activo = MODELO
 
     cuenta_fija = _Cuenta("clave explicita", api_key) if api_key else None
     ultimo_error = None
