@@ -713,16 +713,34 @@ def _adaptar_orden_agy(orden, instruccion):
         nueva.append(arg)
         i += 1
 
+    if "--mode" not in nueva:
+        nueva += ["--mode", "accept-edits"]
+
+    ajustes_agy = {"allowNonWorkspaceAccess": True}
     if permitidas or vetadas:
         permisos_cfg = {}
         if permitidas:
             permisos_cfg["allow"] = permitidas
         if vetadas:
             permisos_cfg["deny"] = vetadas
-        nueva += [
-            "--settings",
-            json.dumps({"permissions": permisos_cfg}, ensure_ascii=False),
-        ]
+        ajustes_agy["permissions"] = permisos_cfg
+    nueva += [
+        "--settings",
+        json.dumps(ajustes_agy, ensure_ascii=False),
+    ]
+
+    if "Write" in vetadas:
+        if "Read" in vetadas:
+            sistema_extra.append(
+                "No uses ninguna herramienta (ni read_file, ni write_file, ni "
+                "edit_file, ni run_command, ni list_dir); responde directamente "
+                "en el mensaje con el texto o JSON pedido."
+            )
+        else:
+            sistema_extra.append(
+                "No uses write_file, edit_file ni run_command; devuelve tu "
+                "respuesta directamente en el mensaje final."
+            )
 
     texto_entrada = instruccion or ""
     if sistema_extra:
@@ -838,7 +856,53 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
         raise RuntimeError(
             f"el CLI devolvio error: {str(sobre.get('result'))[:600]}")
     texto = sobre.get("result")
+    if (not isinstance(texto, str) or not texto.strip()) and cwd:
+        ruta_salida = os.path.join(cwd, FICHERO_SALIDA)
+        if os.path.isfile(ruta_salida) and os.path.getsize(ruta_salida) > 0:
+            texto = "LISTO"
+            sobre["result"] = texto
+    if (not isinstance(texto, str) or not texto.strip()) and sobre.get("conversation_id"):
+        aviso_reintento = (
+            "\n\nIMPORTANTE: Tu turno anterior termino sin texto de respuesta. "
+            "No uses herramientas bloqueadas (como run_command); entrega ahora "
+            "mismo la respuesta completa directamente en tu mensaje de salida"
+            f" (o en {FICHERO_SALIDA} si se pidio fichero)."
+        )
+        try:
+            grupo = {} if os.name == "nt" else {"start_new_session": True}
+            proc2 = subprocess.Popen(
+                orden_real, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, cwd=cwd, env=entorno(cuenta),
+                **SIN_VENTANA, **grupo)
+            if avance is not None:
+                avance.al_cancelar = lambda: matar_arbol(proc2)
+            crudo2, _ = proc2.communicate(
+                ((instruccion_real or "") + aviso_reintento).encode("utf-8"),
+                timeout=techo)
+            segundos = time.time() - arranque
+            if proc2.returncode == 0:
+                sobre2 = _normalizar_sobre_agy(
+                    json.loads(crudo2.decode("utf-8", errors="replace")))
+                if isinstance(sobre2, dict) and not sobre2.get("is_error"):
+                    sobre = sobre2
+                    texto = sobre.get("result")
+                    if (not isinstance(texto, str) or not texto.strip()) and cwd:
+                        ruta_salida = os.path.join(cwd, FICHERO_SALIDA)
+                        if os.path.isfile(ruta_salida) and os.path.getsize(ruta_salida) > 0:
+                            texto = "LISTO"
+                            sobre["result"] = texto
+        except Exception:  # noqa: BLE001
+            pass
     if not isinstance(texto, str) or not texto.strip():
+        denegadas = sobre.get("denied_actions") if isinstance(sobre, dict) else None
+        if isinstance(denegadas, list) and denegadas:
+            nombres = ", ".join(
+                str(d.get("display_name") or d.get("action") or "?")
+                for d in denegadas if isinstance(d, dict)
+            )
+            raise RuntimeError(
+                f"el CLI devolvio una respuesta vacia (acciones bloqueadas: {nombres})"
+            )
         raise RuntimeError("el CLI devolvio una respuesta vacia")
 
     # El sobre del CLI no dice con que esfuerzo se le hablo, y el esfuerzo es la
