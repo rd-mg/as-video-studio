@@ -823,10 +823,30 @@ def modelo_configurado():
     if env:
         return env.strip()
     try:
-        from pasos import ajustes
-        return ajustes.leer().get("modelo_imagen") or MODELO
+        try:
+            from pasos import ajustes
+        except ImportError:
+            import ajustes
+        mod = ajustes.leer().get("modelo_imagen")
+        if mod:
+            return mod
     except Exception:
-        return MODELO
+        pass
+
+    try:
+        ruta_ajustes = os.environ.get("ESTUDIO_AJUSTES")
+        if not ruta_ajustes:
+            raiz = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            ruta_ajustes = os.path.join(raiz, "ajustes.json")
+        if ruta_ajustes and os.path.isfile(ruta_ajustes):
+            with open(ruta_ajustes, "r", encoding="utf-8") as fh:
+                datos = json.load(fh)
+                if isinstance(datos, dict) and datos.get("modelo_imagen"):
+                    return str(datos["modelo_imagen"]).strip()
+    except Exception:
+        pass
+
+    return MODELO
 
 
 def _generar_imagen_predict(prompt, cuenta, *, tamano="apaisado", quality="low", modelo="imagen-3.0-generate-002"):
@@ -980,6 +1000,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                          + ", ".join(str(f) for f in faltan[:5]))
 
     modelo_activo = modelo_configurado()
+    print(f"[imagen] generando plano con modelo: {modelo_activo}", flush=True)
     if modelo_activo in ("agy-image-generator", "agy"):
         if shutil.which("agy"):
             try:
