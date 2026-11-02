@@ -50,6 +50,7 @@ import time
 # antes de que `shutil.which` busque el binario, sin romper los dobles de prueba
 # que sustituyen `shutil.which`.
 for _dir_extra in (
+    "/usr/local/bin",
     os.path.expanduser("~/.gemini/bin"),
     os.path.expanduser("~/.local/bin"),
     os.path.join(os.environ.get("LOCALAPPDATA") or "", "agy", "bin"),
@@ -427,6 +428,9 @@ def entorno(cuenta=None):
     if carpeta:
         limpio["CLAUDE_CONFIG_DIR"] = carpeta
         limpio["AGY_CONFIG_DIR"] = carpeta
+        limpio["HOME"] = carpeta
+        limpio["USERPROFILE"] = carpeta
+        limpio["DBUS_SESSION_BUS_ADDRESS"] = "invalid"
     return limpio
 
 

@@ -69,9 +69,9 @@ DEFECTO = "__defecto__"
 #: Como suena «no hay sesion» en lo que devuelve el CLI. Se casa por trozos y no
 #: por frases enteras, por lo mismo que `cli_claude.limite_de`: el texto exacto
 #: cambia con cada version del CLI.
-_SESION = ("not logged in", "no est", "log in", "login", "authenticat", "oauth",
-           "token expired", "expired", "credential", "unauthorized", "401",
-           "sesion", "sesión", "caduc")
+_SESION = ("not logged in", "no est", "log in", "login", "please sign in", "sign in",
+           "authenticat", "oauth", "token expired", "expired", "credential",
+           "unauthorized", "401", "sesion", "sesión", "caduc")
 
 #: Lo que se le manda en la prueba. Corto a proposito: lo que se mide es si la
 #: cuenta contesta, no que contesta.

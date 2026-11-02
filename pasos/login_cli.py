@@ -111,6 +111,7 @@ _FALLO = re.compile(r"^\s*(Login failed:.*|Error:.*|Authentication failed.*)$", 
 #: quedarse solo con lo que dijo despues de que se le pasara uno.
 _PIDE = "Paste code here if prompted"
 _PIDE_AGY = "Or, paste the authorization code here and press Enter:"
+_PIDE_AGY_2 = "If you aren't automatically redirected, paste the authorization code below:"
 
 _LOCK = threading.RLock()
 #: id de cuenta -> Intento. Vive en memoria a proposito: recargar la pagina
@@ -129,7 +130,10 @@ def _ultima_linea(texto):
     pegada detras del «Paste code here if prompted > » de la misma linea.
     """
     for linea in reversed(str(texto or "").splitlines()):
-        limpia = linea.split(_PIDE, 1)[-1].split(_PIDE_AGY, 1)[-1].lstrip("> :").strip()
+        limpia = (linea.split(_PIDE, 1)[-1]
+                  .split(_PIDE_AGY, 1)[-1]
+                  .split(_PIDE_AGY_2, 1)[-1]
+                  .lstrip("> :").strip())
         if limpia:
             return limpia
     return ""
@@ -182,11 +186,14 @@ def situacion(carpeta=""):
                     "error": f"no se ha podido preguntar al CLI: {fallo}"}
         salida = ((proceso.stdout or b"") + (proceso.stderr or b"")).decode(
             "utf-8", errors="replace").strip()
-        conectada = proceso.returncode == 0 and "authentication required" not in salida.lower()
+        baja = salida.lower()
+        conectada = (proceso.returncode == 0
+                     and "authentication required" not in baja
+                     and "please sign in" not in baja)
         return {
             "conectada": conectada,
             "correo": "sesion activa" if conectada else "",
-            "plan": "Antigravity" if conectada else "",
+            "plan": "Gemini / Antigravity" if conectada else "",
             "metodo": "agy" if conectada else "",
             "error": "",
         }
