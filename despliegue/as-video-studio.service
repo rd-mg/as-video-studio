@@ -7,6 +7,7 @@ Type=simple
 User=studio
 Group=studio
 WorkingDirectory=/opt/as-video-studio/app
+Environment=HOME=/opt/as-video-studio/home
 EnvironmentFile=/opt/as-video-studio/datos/entorno
 ExecStart=/opt/as-video-studio/venv/bin/python /opt/as-video-studio/app/app.py --puerto ${PUERTO} --host 127.0.0.1
 Restart=on-failure

@@ -79,9 +79,36 @@ registro() {
 }
 
 reiniciar() {
+  sincronizar_agy
   systemctl restart as-video-login as-video-studio
   sleep 2
   estado
+}
+
+sincronizar_agy() {
+  mkdir -p "$RAIZ/home"
+  if [ -d /root/.config/antigravity ]; then
+    mkdir -p "$RAIZ/home/.config"
+    rsync -a /root/.config/antigravity "$RAIZ/home/.config/"
+  fi
+  if [ -d /root/.gemini ]; then
+    mkdir -p "$RAIZ/home/.gemini"
+    rsync -a --exclude='conversations/' --exclude='implicit/' --exclude='crashes/' \
+      --exclude='log/' --exclude='brain/' --exclude='*.db*' \
+      /root/.gemini/ "$RAIZ/home/.gemini/"
+  fi
+  for d in "$RAIZ/datos/secretos/cli"/*/; do
+    [ -d "$d" ] || continue
+    if [ ! -s "$d/.config/antigravity/plugin-secrets.json" ] && [ -d "$RAIZ/home/.config/antigravity" ]; then
+      mkdir -p "$d/.config"
+      rsync -a "$RAIZ/home/.config/antigravity" "$d/.config/"
+    fi
+    if [ -d "$RAIZ/home/.gemini" ]; then
+      mkdir -p "$d/.gemini"
+      rsync -a "$RAIZ/home/.gemini/" "$d/.gemini/"
+    fi
+  done
+  chown -R "$USUARIO:$USUARIO" "$RAIZ/home" "$RAIZ/datos/secretos" 2>/dev/null || true
 }
 
 actualizar() {
@@ -146,6 +173,7 @@ actualizar() {
   nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
 
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
+  sincronizar_agy
 
   systemctl restart as-video-login as-video-studio
   trap - EXIT
