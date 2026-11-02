@@ -6345,7 +6345,7 @@ def _cuentas_de_imagen():
         #
         # Sin clave la respuesta honesta es «ninguna cuenta», no un error.
         texto = str(fallo)
-        if "OPENAI_API_KEY" in texto:
+        if "OPENAI_API_KEY" in texto or "GEMINI_API_KEY" in texto or "GOOGLE_API_KEY" in texto:
             return []
         return {"error": texto or "el motor de imagen aborto sin mensaje"}
     except Exception as fallo:  # noqa: BLE001
@@ -6698,7 +6698,7 @@ def _asistente_listo():
         }
         if not sesion.get("conectada"):
             ficha["motivo"] = (sesion.get("error")
-                               or ("todavía no has entrado con tu cuenta de Claude"
+                               or ("todavía no has entrado con tu cuenta de Antigravity CLI (Gemini)"
                                    if por_defecto else
                                    f"la cuenta «{ficha['etiqueta']}» no tiene sesión"))
         elif (ficha_salud or {}).get("estado") in ("cupo", "sesion", "tiempo", "error"):
@@ -6710,7 +6710,7 @@ def _asistente_listo():
     if buenas:
         return True, "", buenas[0], fichas, sin_probar
     motivo = ("; ".join(f["motivo"] for f in fichas)
-              or "todavía no has entrado con tu cuenta de Claude")
+              or "todavía no has entrado con tu cuenta de Antigravity CLI (Gemini)")
     return False, motivo, None, fichas, sin_probar
 
 
@@ -6731,7 +6731,7 @@ def _foto_para_asistente(pid, pantalla=None):
     # -- claves y cuentas (sin ninguna clave dentro)
     try:
         resumen = _claves().resumen()
-        lineas.append("claves: OpenAI (imagenes) "
+        lineas.append("claves: Google AI / Nano Banana 2.1 (imagenes) "
                       + ("puesta" if resumen["openai"] else
                          "SIN PONER (sin ella no se generan imagenes)")
                       + "; Cartesia (voz) "
@@ -6743,7 +6743,7 @@ def _foto_para_asistente(pid, pantalla=None):
         cuentas = _cuentas_cli_para_pantalla()
         if not any(c.get("guardada") for c in cuentas):
             sesion = _sesion_de(_CUENTA_POR_DEFECTO_CLI)
-            lineas.append("cuentas de Claude (CLI): ninguna con sesion hecha en el "
+            lineas.append("cuentas de Antigravity CLI / Gemini: ninguna con sesion hecha en el "
                           "almacen; se usa la sesion por defecto del CLI, que "
                           + (f"esta conectada como {sesion.get('correo') or '?'}"
                              f" ({sesion.get('plan') or 'plan ?'})"
@@ -6752,7 +6752,7 @@ def _foto_para_asistente(pid, pantalla=None):
             sesion = cuenta.get("sesion") or {}
             intento = cuenta.get("intento") or {}
             lineas.append(
-                f"cuenta de Claude '{cuenta['etiqueta'] or cuenta['id']}'"
+                f"cuenta de Antigravity CLI (Gemini) '{cuenta['etiqueta'] or cuenta['id']}'"
                 f"{' (manda)' if cuenta.get('manda') else ''}: "
                 + (f"con sesion como {sesion.get('correo') or '?'} "
                    f"({sesion.get('plan') or 'plan ?'})"

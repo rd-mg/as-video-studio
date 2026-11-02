@@ -296,19 +296,20 @@ def _fusionar(actual, peticion):
     salida = _vacio()
     por_id = {c["id"]: c for c in actual["openai"]}
 
-    if "openai" in peticion:
-        crudas = peticion.get("openai")
+    if "gemini" in peticion or "openai" in peticion:
+        llave_img = "gemini" if "gemini" in peticion else "openai"
+        crudas = peticion.get(llave_img)
         if not isinstance(crudas, list):
-            raise ErrorClaves("'openai' tiene que ser una lista de cuentas")
+            raise ErrorClaves(f"'{llave_img}' tiene que ser una lista de cuentas")
         if len(crudas) > MAX_OPENAI:
             raise ErrorClaves(
-                "aqui va UNA clave de OpenAI. Si tienes varias cuentas, "
-                "elige con cual generar: repartir entre ellas convertia una "
+                "aqui va UNA clave de Google AI (GEMINI_API_KEY). Si tienes varias "
+                "cuentas, elige con cual generar: repartir entre ellas convertia una "
                 "clave mal puesta en «va mas lento» en vez de en un error")
         cuentas = []
         for cruda in crudas:
             if not isinstance(cruda, dict):
-                raise ErrorClaves("cada cuenta de OpenAI es un objeto "
+                raise ErrorClaves("cada cuenta de Google AI es un objeto "
                                   "{etiqueta, clave}")
             cid = str(cruda.get("id") or "").strip()
             clave = str(cruda.get("clave") or "").strip()
@@ -319,7 +320,7 @@ def _fusionar(actual, peticion):
                                       f"clave y no hay ninguna guardada")
                 clave = anterior["clave"]
             if not clave:
-                raise ErrorClaves("una cuenta de OpenAI sin clave no sirve de "
+                raise ErrorClaves("una cuenta de Google AI sin clave no sirve de "
                                   "nada: escribela o quita la cuenta")
             _validar_clave_openai(clave)
             cuentas.append({
@@ -348,9 +349,10 @@ def _fusionar(actual, peticion):
         else:
             salida[suelta] = actual[suelta]
 
-    if "claude_cli" in peticion:
+    llave_cli = next((k for k in ("agy_cli", "gemini_cli", "claude_cli") if k in peticion), None)
+    if llave_cli is not None:
         salida["claude_cli"]["cuentas"] = _cuentas_cli_pedidas(
-            peticion.get("claude_cli"), actual["claude_cli"]["cuentas"])
+            peticion.get(llave_cli), actual["claude_cli"]["cuentas"])
     else:
         salida["claude_cli"] = actual["claude_cli"]
     return salida
@@ -427,8 +429,9 @@ def _validar_clave_openai(clave):
     # Un dedazo aqui no revienta nada: se ve como un 401 a mitad de una tanda de
     # 49 planos, que es la forma cara de enterarse.
     if len(clave) < 20 or re.search(r"\s", clave):
-        raise ErrorClaves("eso no parece una clave de OpenAI: son largas y sin "
-                          "espacios. Copiala entera desde platform.openai.com")
+        raise ErrorClaves("eso no parece una clave de Google AI (GEMINI_API_KEY): "
+                          "son largas y sin espacios. Copiala entera desde "
+                          "aistudio.google.com/apikey")
 
 
 def _sin_repetidas(cuentas):
@@ -440,7 +443,7 @@ def _sin_repetidas(cuentas):
                 f"la misma clave esta puesta dos veces ({otra or 'sin etiqueta'}"
                 f" y {cuenta['etiqueta'] or 'sin etiqueta'}). Repartir entre dos "
                 f"copias de la misma cuenta no dobla el ritmo: el limite es del "
-                f"servidor de OpenAI, no de la clave.")
+                f"servidor de Google AI, no de la clave.")
         vistas[cuenta["clave"]] = cuenta["etiqueta"]
 
 

@@ -187,7 +187,8 @@ def probar_claude(cuentas):
         fichas.append(_ficha("claude", estado, salud_cli.describir(salud, etiqueta),
                              cuenta=cuenta.get("id") or "", salud=salud))
     if not fichas:
-        fichas.append(_ficha("claude", "sin_clave", "no hay ninguna cuenta de Claude con sesion"))
+        fichas.append(_ficha("claude", "sin_clave",
+                             "no hay ninguna cuenta de Antigravity CLI (Gemini) con sesion"))
     return fichas
 
 
@@ -234,9 +235,9 @@ def probar_todas(cuentas_claude=(), con_claude=True):
     return fichas
 
 
-NOMBRES = {"openai": "OpenAI (imágenes)", "cartesia": "Cartesia (voz)",
+NOMBRES = {"openai": "Google AI / Nano Banana 2.1 (imágenes)", "cartesia": "Cartesia (voz)",
            "jamendo": "Jamendo (música)", "freesound": "FreeSound (efectos)",
-           "claude": "Claude"}
+           "claude": "Antigravity CLI (Gemini)"}
 
 
 def resumen_texto(fichas):

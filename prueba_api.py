@@ -1801,7 +1801,7 @@ def probar_la_foto_del_asistente(cliente, pid):
     igual(respuesta.status_code, 200, "GET /api/asistente/foto responde 200")
     foto = ficha.get("foto") or ""
     ok("sk-esta-clave" not in foto and "foto-000" not in foto, "la clave NO viaja en la foto")
-    ok("OpenAI (imagenes) puesta" in foto, "pero si que esta puesta")
+    ok("Google AI / Nano Banana 2.1 (imagenes) puesta" in foto, "pero si que esta puesta")
     ok("PROYECTO ABIERTO EN PANTALLA" in foto and pid in foto, "lleva el proyecto abierto")
     ok("paso ingesta" in foto and "paso render" in foto, "con sus ocho pasos")
     ok("S03: la cara sale rara" in foto, "y los errores que la pantalla tiene a la vista")

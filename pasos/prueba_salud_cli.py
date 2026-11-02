@@ -253,7 +253,7 @@ def prueba_claves():
         comprobar(all(f["estado"] in ("ok", "sin_clave") for f in fichas),
                   "y en simulado ninguna sale a la red")
         texto = comprobar_claves.resumen_texto(fichas)
-        comprobar("OpenAI" in texto and "\n" in texto, "y hay un resumen legible")
+        comprobar("Google AI" in texto and "\n" in texto, "y hay un resumen legible")
     finally:
         os.environ.pop("ESTUDIO_SIMULAR", None)
 

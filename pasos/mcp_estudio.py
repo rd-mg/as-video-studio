@@ -218,17 +218,18 @@ def salud_servicio(argumentos):
 
 HERRAMIENTAS = {
     "probar_claves": (probar_claves,
-        "Prueba DE VERDAD cada clave contra su servicio (OpenAI, Cartesia, Jamendo, "
-        "FreeSound) con una llamada que no cuesta dinero, y dice cual autentica y cual "
-        "no. Con claude=true prueba tambien las cuentas de Claude (tarda mas). Usala "
-        "cuando pregunten si las claves estan bien o si algo falla por una clave.",
-        {"claude": {"type": "boolean", "description": "probar tambien las cuentas de Claude"}}),
+        "Prueba DE VERDAD cada clave contra su servicio (Google AI Nano Banana 2.1, "
+        "Cartesia, Jamendo, FreeSound) con una llamada que no cuesta dinero, y dice "
+        "cual autentica y cual no. Con claude=true prueba tambien las cuentas de "
+        "Antigravity CLI (Gemini) (tarda mas). Usala cuando pregunten si las claves "
+        "estan bien o si algo falla por una clave.",
+        {"claude": {"type": "boolean", "description": "probar tambien las cuentas de Antigravity CLI (Gemini)"}}),
     "probar_claude": (probar_claude,
-        "Prueba las cuentas de Claude del CLI con una llamada minima y dice cual "
+        "Prueba las cuentas de Antigravity CLI (Gemini) con una llamada minima y dice cual "
         "contesta, cual tiene el cupo agotado (y cuando se renueva) y cual no tiene sesion.",
         {}),
     "estado_estudio": (estado_estudio,
-        "La foto del estado del Estudio ahora mismo: claves puestas, cuentas de Claude, "
+        "La foto del estado del Estudio ahora mismo: claves puestas, cuentas de Antigravity CLI (Gemini), "
         "proyectos, y del proyecto abierto sus ocho pasos, trabajos, bitacora y coste.",
         {"proyecto": {"type": "string", "description": "id del proyecto; por defecto el abierto"}}),
     "trabajos": (trabajos,
